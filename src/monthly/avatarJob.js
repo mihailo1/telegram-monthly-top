@@ -102,13 +102,20 @@ async function listJobs() {
  * @param {string} [input.rangeLabel]
  * @param {string} [input.pollQuestion]
  * @param {number} [input.delayDays]
+ * @param {string|Date} [input.processAfter] absolute time (overrides delayDays)
+ * @param {string|Date} [input.createdAt] poll publish time for delayDays calc
  */
 export async function scheduleAvatarJob(input) {
   const delayDays = input.delayDays ?? DEFAULT_DELAY_DAYS;
-  const created = new Date();
-  const processAfter = new Date(
-    created.getTime() + delayDays * 24 * 60 * 60 * 1000,
-  );
+  const created = input.createdAt ? new Date(input.createdAt) : new Date();
+  let processAfter;
+  if (input.processAfter) {
+    processAfter = new Date(input.processAfter);
+  } else {
+    processAfter = new Date(
+      created.getTime() + delayDays * 24 * 60 * 60 * 1000,
+    );
+  }
   /** @type {AvatarJob} */
   const job = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,

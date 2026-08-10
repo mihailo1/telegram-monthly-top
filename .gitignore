@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Secrets & local env
+.env
+.env.*
+!.env.example
+
+# Telegram sessions
+.session
+*.session
+session*.txt
+data/user.session
+
+# Runtime state (queues, locks, browser sessions) — top-level only
+# (do not ignore src/data/ which holds committed phrase corpus)
+/data/
+!/data/.gitkeep
+
+# Vercel
+.vercel/
+
+# OS / editor
+.DS_Store
+*.log
+tmp/
+dist/

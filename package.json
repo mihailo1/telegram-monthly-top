@@ -1,0 +1,35 @@
+{
+  "name": "telegram-monthly-top",
+  "version": "0.2.0",
+  "description": "Monthly top posts by reactions → album + poll (preview-first), Vercel-ready",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "bot": "node src/bot.js",
+    "test-post": "node src/test-post.js",
+    "rank-demo": "node src/rank.js",
+    "login": "node src/login.js",
+    "preview-month": "node src/preview-month.js",
+    "set-webhook": "node scripts/set-webhook.mjs",
+    "env-check": "node scripts/print-env-for-vercel.mjs",
+    "vercel-dev": "vercel dev"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "poll",
+    "monthly-top",
+    "vercel"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@vercel/blob": "^1.1.1",
+    "@vercel/functions": "^3.9.2",
+    "dotenv": "^16.4.7",
+    "grammy": "^1.35.0",
+    "telegram": "^2.26.22"
+  }
+}

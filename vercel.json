@@ -1,0 +1,35 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "framework": null,
+  "installCommand": "npm install",
+  "buildCommand": "echo 'no build step'",
+  "outputDirectory": "public",
+  "functions": {
+    "api/cron.js": {
+      "maxDuration": 60
+    },
+    "api/preview.js": {
+      "maxDuration": 60
+    },
+    "api/queue-cron.js": {
+      "maxDuration": 60
+    },
+    "api/webhook.js": {
+      "maxDuration": 60
+    },
+    "api/setup-webhook.js": {
+      "maxDuration": 10
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "0 6 6 * *"
+    },
+    {
+      "path": "/api/queue-cron",
+      "schedule": "0 7 * * *"
+    }
+  ]
+}

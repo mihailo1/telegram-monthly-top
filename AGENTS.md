@@ -8,6 +8,7 @@ Instructions for coding agents. Keep this file updated when architecture or prod
 2. **Admin queue** — operator uploads media to bot DM; one item/day, random time 10:00–22:00 (`APP_TZ`).
 3. **Members queue** — media from **channel Direct Messages** (and non-admin media on the bot); priority over admin; up to **4/day** if no admin post that day.
 4. **Reply phrases** — random curated quote to the author instead of “you are queued at HH:MM”.
+5. **Poll → avatar** — `scheduleAvatarJob` on monthly publish; after `AVATAR_POLL_DELAY_DAYS` (default 5), `stopPoll` + `setChatPhoto` with winning option’s photo.
 
 **Preview-first** for monthly top: never auto-publish monthly poll to the channel without ✅.
 
@@ -47,6 +48,7 @@ Monthly: collect (GramJS) → rank → DM preview → ✅ → publishAlbumAndPol
 | `src/members/*` | UGC store, place/post, monoforum poll, browser session |
 | `src/scheduler/dayState.js` | Per-day admin/members counters |
 | `src/format.js` | Monthly poll title/options (channel historical locale) |
+| `src/monthly/avatarJob.js` | Delayed poll winner → channel avatar |
 | `src/data/reply-phrases.json` | Quote corpus for author replies |
 | `api/webhook.js` | Telegram updates (`bot.init` required) |
 | `api/queue-cron.js` | Poll + members tick + admin tick |

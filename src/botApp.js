@@ -1039,12 +1039,31 @@ export function createBot() {
         ? `https://t.me/${pending.channelUsername}/${pollId}`
         : "";
 
+      // After 5 days: stop poll, set winning photo as channel avatar
+      let avatarNote = "";
+      try {
+        const { scheduleAvatarJob } = await import("./monthly/avatarJob.js");
+        const job = await scheduleAvatarJob({
+          chatId,
+          pollMessageId: pollId,
+          photoFileIds: pending.photos.map((p) => p.fileId),
+          channelUsername: pending.channelUsername,
+          rangeLabel: pending.rangeLabel,
+          pollQuestion: pending.pollQuestion,
+        });
+        avatarNote = `Avatar job: <code>${job.id}</code> (after ${job.processAfter?.slice(0, 10) || "5 days"})`;
+      } catch (err) {
+        console.error("scheduleAvatarJob failed", err);
+        avatarNote = `Avatar job not scheduled: ${escapeHtml(err.message || err)}`;
+      }
+
       await ctx.editMessageText(
         [
           `✅ Posted to @${pending.channelUsername}`,
           `Poll: <code>${pollId}</code>`,
           `Album: <code>${albumMessages.map((m) => m.message_id).join(", ")}</code>`,
           channelLink ? `<a href="${channelLink}">open</a>` : "",
+          avatarNote,
         ]
           .filter(Boolean)
           .join("\n"),

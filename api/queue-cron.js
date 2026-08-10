@@ -6,6 +6,7 @@ import { Bot } from "grammy";
 import { assertBotToken, config as appConfig } from "../src/config.js";
 import { pollChannelDirectMessages } from "../src/members/pollMonoforum.js";
 import { processMembersTick } from "../src/members/process.js";
+import { processAvatarJobs } from "../src/monthly/avatarJob.js";
 import { processQueueTick } from "../src/queue/process.js";
 
 export const config = {
@@ -51,7 +52,15 @@ export default async function handler(req, res) {
     // 3) Admin queue (paused while members active)
     const admin = await processQueueTick({ bot });
 
-    res.status(200).json({ ok: true, poll, members, admin });
+    // 4) Monthly poll → channel avatar (5 days after publish)
+    let avatar = { checked: 0, due: 0, actions: [] };
+    try {
+      avatar = await processAvatarJobs({ bot });
+    } catch (err) {
+      avatar = { checked: 0, due: 0, actions: [`avatar_throw:${err.message}`] };
+    }
+
+    res.status(200).json({ ok: true, poll, members, admin, avatar });
   } catch (err) {
     console.error("queue-cron failed", err);
     res.status(500).json({ ok: false, error: String(err.message || err) });

@@ -3,18 +3,17 @@
  *
  * Rules (from product):
  * - Priority over admin queue
- * - If admin already posted today → no members today (tomorrow+)
+ * - If admin already posted that day → no members that day (next free day)
  * - Else up to 4 members posts/day
- * - Immediate post if a slot is free now; else schedule 10–22 MSK and notify author
- * - Notify only when going to wait/queue (not if posted immediately)
+ * - NEVER post to channel on ingest — always enqueue + schedule 10–22 APP_TZ
+ * - Always reply author in channel DMs with a film phrase (not queue ETA)
  */
 import { Bot, InputFile } from "grammy";
 import { assertAdminId, assertBotToken, config } from "../config.js";
 import {
-  adminCanPostToday,
-  getDayRecord,
+  adminPostedOnDay,
   incrementDayPost,
-  membersSlotsLeftToday,
+  membersSlotsLeftOnDay,
 } from "../scheduler/dayState.js";
 import {
   addDays,
@@ -77,87 +76,95 @@ export async function publishMemberItem(api, chatId, item) {
 }
 
 /**
- * After ingest: try immediate post or schedule + optional author notify.
+ * Send a random film phrase to the author (channel DM / monoforum / private).
+ * Always used after they send photo(s) — not queue ETA text.
+ * @param {import('grammy').Bot} bot
+ * @param {{ replyChatId?: string|number, fromUserId?: string|number, replyToMessageId?: number }} opts
+ * @returns {Promise<{ ok: boolean, phrase: string }>}
+ */
+export async function replyAuthorWithPhrase(bot, opts = {}) {
+  const { randomReplyPhrase } = await import("../replyPhrases.js");
+  const phrase = randomReplyPhrase();
+  const { replyChatId, fromUserId, replyToMessageId } = opts;
+  const extra =
+    replyToMessageId != null
+      ? { reply_parameters: { message_id: replyToMessageId } }
+      : {};
+
+  if (replyChatId) {
+    try {
+      await bot.api.sendMessage(replyChatId, phrase, extra);
+      return { ok: true, phrase };
+    } catch (err) {
+      console.warn(
+        "phrase via replyChatId failed",
+        err?.message || err,
+      );
+    }
+  }
+  if (fromUserId) {
+    try {
+      await bot.api.sendMessage(fromUserId, phrase);
+      return { ok: true, phrase };
+    } catch (err) {
+      console.warn("phrase via fromUserId failed", err?.message || err);
+    }
+  }
+  return { ok: false, phrase };
+}
+
+/**
+ * Next free members day (no admin that day, < 4 members already).
+ * @param {string} fromDay
+ * @param {string} tz
+ */
+async function findNextMembersDay(fromDay, tz) {
+  let day = fromDay;
+  for (let i = 0; i < 60; i++) {
+    const slots = await membersSlotsLeftOnDay(day, tz);
+    if (slots > 0) return day;
+    day = addDays(day, 1);
+  }
+  return day;
+}
+
+/**
+ * After ingest: ALWAYS schedule (never post to channel here) + phrase-reply to author.
  * @param {import('./store.js').MemberItem} item
  * @param {import('grammy').Bot} bot
- * @param {{ replyChatId?: string|number }} [opts] chat to notify (monoforum / DM)
+ * @param {{ replyChatId?: string|number, replyToMessageId?: number }} [opts]
  */
 export async function placeMemberItem(item, bot, opts = {}) {
   const tz = config.timeZone;
   const channelId = config.groupChatId;
   if (!channelId) throw new Error("GROUP_CHAT_ID missing");
   const replyChatId = opts.replyChatId;
+  const replyToMessageId = opts.replyToMessageId;
 
   const today = localDayString(tz);
-  const dayRec = await getDayRecord(today);
-  const slots = membersSlotsLeftToday(dayRec);
   const { hour } = wallClock(tz);
 
-  // Immediate if slot free and still within posting window (before 22:00)
-  if (slots > 0 && hour < 22) {
-    try {
-      const msg = await publishMemberItem(bot.api, channelId, item);
-      await updateMemberItem(item.id, {
-        status: "posted",
-        postedAt: new Date().toISOString(),
-        postedMessageId: msg.message_id,
-        postDay: today,
-        authorNotified: false, // no queue notify on immediate
-      });
-      await incrementDayPost("members", today);
-      return {
-        mode: "immediate",
-        postAt: null,
-        messageId: msg.message_id,
-      };
-    } catch (err) {
-      console.error("members immediate post failed, queueing", err);
-      // fall through to schedule
-    }
-  }
-
-  // Schedule: find next day with free members slots
+  // Never publish to channel on ingest — only members queue + cron/tick posts later.
+  // Admin already used today → start looking from tomorrow.
   let day = today;
-  // if no slots today or after 22:00, start tomorrow
-  if (slots <= 0 || hour >= 22) {
+  const adminToday = await adminPostedOnDay(today, tz);
+  const slotsToday = await membersSlotsLeftOnDay(today, tz);
+  if (adminToday || slotsToday <= 0 || hour >= 22) {
     day = addDays(today, 1);
   }
+  day = await findNextMembersDay(day, tz);
 
-  // Walk forward until a day without admin posts and members < 4
-  for (let i = 0; i < 60; i++) {
-    const rec = await getDayRecord(day);
-    // days with admin posts are blocked for members
-    if ((rec.admin || 0) > 0) {
-      day = addDays(day, 1);
-      continue;
-    }
-    // count already scheduled members for that day
-    const { items } = await loadMembersQueue();
-    const scheduledThatDay = items.filter(
-      (x) =>
-        (x.status === "scheduled" || x.status === "posted") &&
-        x.postDay === day,
-    ).length;
-    // for "posted" today already in dayRec; for future days use scheduled count
-    const used =
-      day === today ? rec.members || 0 : scheduledThatDay;
-    if (used < 4) {
-      break;
-    }
-    day = addDays(day, 1);
-  }
-
+  /** @type {Date} */
   let postAt;
   if (day === today && hour < 22) {
-    // random later today if still time; if before 10, random in full window
+    // later today, still inside 10–22 window
     if (hour < 10) {
       postAt = randomPostAt(day, tz);
     } else {
-      // random between now+5min and 22:00
       const start = new Date(Date.now() + 5 * 60 * 1000);
       const end = localDateTime(day, 22, 0, tz);
       if (start >= end) {
-        day = addDays(day, 1);
+        day = await findNextMembersDay(addDays(today, 1), tz);
         postAt = randomPostAt(day, tz);
       } else {
         const t =
@@ -176,17 +183,22 @@ export async function placeMemberItem(item, bot, opts = {}) {
     postAt: postAt.toISOString(),
   });
 
-  // Author gets a random film phrase (no queue ETA spam). Admin gets a quiet log.
-  const { randomReplyPhrase } = await import("../replyPhrases.js");
-  const phrase = randomReplyPhrase();
-
   try {
     const adminId = assertAdminId();
+    const why = adminToday
+      ? "admin already posted today → members deferred"
+      : slotsToday <= 0
+        ? "no members slots today"
+        : hour >= 22
+          ? "after 22:00 window"
+          : "queued";
     await bot.api.sendMessage(
       adminId,
-      `👥 Members queue +1 (waiting)\n` +
+      `👥 Members queue +1\n` +
         (item.fromUsername ? `@${item.fromUsername}\n` : "") +
+        `${why}\n` +
         `when: ${formatLocal(postAt, tz)}\n` +
+        `day: ${day}\n` +
         `id: <code>${item.id}</code>`,
       { parse_mode: "HTML" },
     );
@@ -194,26 +206,23 @@ export async function placeMemberItem(item, bot, opts = {}) {
     /* ignore */
   }
 
-  let authorNotified = false;
-  if (replyChatId) {
-    try {
-      await bot.api.sendMessage(replyChatId, phrase);
-      authorNotified = true;
-    } catch {
-      /* ignore */
-    }
-  }
-  if (!authorNotified && item.fromUserId) {
-    try {
-      await bot.api.sendMessage(item.fromUserId, phrase);
-      authorNotified = true;
-    } catch {
-      /* ignore */
-    }
-  }
-  await updateMemberItem(item.id, { authorNotified });
+  // Always auto-reply author with a film phrase in channel DMs / monoforum
+  const notified = await replyAuthorWithPhrase(bot, {
+    replyChatId,
+    fromUserId: item.fromUserId,
+    replyToMessageId,
+  });
+  await updateMemberItem(item.id, { authorNotified: notified.ok });
 
-  return { mode: "scheduled", postAt, messageId: null, phrase };
+  return {
+    mode: "scheduled",
+    postAt,
+    messageId: null,
+    postDay: day,
+    phrase: notified.phrase,
+    authorNotified: notified.ok,
+    deferredForAdmin: adminToday,
+  };
 }
 
 /**
@@ -246,27 +255,26 @@ export async function processMembersTick(opts = {}) {
 
   for (const item of due) {
     const day = item.postDay || localDayString(tz);
-    const rec = await getDayRecord(day);
-    // safety: don't post members on admin day
-    if ((rec.admin || 0) > 0) {
-      // push to next day
-      const nextDay = addDays(day, 1);
+    // safety: don't post members on admin day (day-state + admin queue)
+    if (await adminPostedOnDay(day, tz)) {
+      const nextDay = await findNextMembersDay(addDays(day, 1), tz);
       const postAt = randomPostAt(nextDay, tz);
       await updateMemberItem(item.id, {
         postDay: nextDay,
         postAt: postAt.toISOString(),
       });
-      summary.actions.push(`defer_admin_day:${item.id}`);
+      summary.actions.push(`defer_admin_day:${item.id}->${nextDay}`);
       continue;
     }
-    if (membersSlotsLeftToday(rec) <= 0 && day === localDayString(tz)) {
-      const nextDay = addDays(day, 1);
+    const slotsLeft = await membersSlotsLeftOnDay(day, tz);
+    if (slotsLeft <= 0) {
+      const nextDay = await findNextMembersDay(addDays(day, 1), tz);
       const postAt = randomPostAt(nextDay, tz);
       await updateMemberItem(item.id, {
         postDay: nextDay,
         postAt: postAt.toISOString(),
       });
-      summary.actions.push(`defer_full:${item.id}`);
+      summary.actions.push(`defer_full:${item.id}->${nextDay}`);
       continue;
     }
 
@@ -315,8 +323,7 @@ export async function postMemberNow(id, bot) {
 
   const tz = config.timeZone;
   const today = localDayString(tz);
-  const rec = await getDayRecord(today);
-  // force post even if limits? user post-now from admin browser — allow
+  // force post even if limits — admin "Post now" from members browser
   try {
     const msg = await publishMemberItem(bot.api, channelId, item);
     await updateMemberItem(id, {

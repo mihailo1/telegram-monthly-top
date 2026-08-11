@@ -4,8 +4,8 @@ Automation for the public Telegram channel [@krasiviyded](https://t.me/krasiviyd
 
 1. **Monthly top** — rank last month’s photo posts by total reactions → poll + album (preview-first)
 2. **Admin daily queue** — you drop media in the bot DM; one post/day at a random time (10:00–22:00 MSK)
-3. **Members queue** — media from **channel Direct Messages**; priority over admin; up to 4 posts/day when no admin post that day
-4. **Film-phrase replies** — random line from a curated quote list instead of dry “queued” notices
+3. **Members queue** — media from **channel Direct Messages**; priority over admin; up to 4 posts/day when no admin post that day. Ingest only enqueues (never instant channel post); if admin already posted that day → next free day
+4. **Film-phrase replies** — when someone sends photo(s) (1 or album) in channel DMs, auto-reply once there with a random line from the quote list (not “queued at HH:MM”)
 5. **Poll → avatar** — 5 days after a monthly poll, stop the poll and set the winning photo as the channel profile picture
 
 Deployed on **Vercel** (webhook + cron). Local long-polling is optional for development.

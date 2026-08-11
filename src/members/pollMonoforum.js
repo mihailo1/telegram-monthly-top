@@ -13,6 +13,7 @@ import { disconnectUserClient, getUserClient } from "../userClient.js";
 import {
   appendMemberPost,
   markSourceSeen,
+  updateMemberItem,
   wasSourceSeen,
 } from "./store.js";
 import { placeMemberItem } from "./process.js";
@@ -227,7 +228,24 @@ export async function pollChannelDirectMessages() {
         sourceKey,
       });
       await markSourceSeen(sourceKey);
-      await placeMemberItem(item, botReady);
+      // Bot API may not reach monoforum; phrase via bot if user has DM, else GramJS below
+      const placed = await placeMemberItem(item, botReady);
+      if (!placed.authorNotified) {
+        try {
+          const { randomReplyPhrase } = await import("../replyPhrases.js");
+          const phrase = placed.phrase || randomReplyPhrase();
+          await client.sendMessage(monoPeer, {
+            message: phrase,
+            replyTo: msgs[0].id,
+          });
+          await updateMemberItem(item.id, { authorNotified: true });
+          summary.actions.push(`phrase_mtproto:${item.id}`);
+        } catch (err) {
+          summary.actions.push(
+            `phrase_fail:${item.id}:${err.message || err}`,
+          );
+        }
+      }
       summary.ingested += 1;
       summary.actions.push(`ingested:${item.id}`);
     }

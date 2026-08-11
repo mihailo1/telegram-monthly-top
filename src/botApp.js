@@ -612,6 +612,9 @@ export function createBot() {
           }));
           const cap =
             parts.map((p) => p.caption).find((c) => c && c.trim()) || "";
+          const firstMsgId = parts
+            .map((p) => p.messageId)
+            .find((id) => id && id > 0);
           const item = await appendMemberPost({
             media: mediaList,
             caption: cap,
@@ -619,30 +622,11 @@ export function createBot() {
             fromUsername: parts[0]?.fromUsername || fromUsername,
             sourceKey: `bot_album_${chatId}_${groupId}`,
           });
-          const result = await placeMemberItem(item, bot, {
+          // placeMemberItem: enqueue only (never channel) + film phrase to author
+          await placeMemberItem(item, bot, {
             replyChatId: chatId,
+            replyToMessageId: firstMsgId || undefined,
           });
-          // Always reply author with a film phrase (instead of queue ETA)
-          try {
-            const { randomReplyPhrase } = await import("./replyPhrases.js");
-            // scheduled already sent phrase inside placeMemberItem; immediate needs one
-            if (result.mode === "immediate") {
-              await bot.api.sendMessage(chatId, randomReplyPhrase());
-            }
-          } catch {
-            /* ignore */
-          }
-          if (result.mode === "immediate") {
-            try {
-              await bot.api.sendMessage(
-                config.adminId,
-                `👥 Members: posted to channel immediately (album ${mediaList.length})\nid: <code>${item.id}</code>`,
-                { parse_mode: "HTML" },
-              );
-            } catch {
-              /* ignore */
-            }
-          }
         });
         return;
       }
@@ -654,27 +638,11 @@ export function createBot() {
         fromUsername,
         sourceKey: `bot_${chatId}_${ctx.message.message_id}`,
       });
-      const result = await placeMemberItem(item, bot, {
+      // Always: members queue + one film phrase in channel DMs (never channel post here)
+      await placeMemberItem(item, bot, {
         replyChatId: chatId,
+        replyToMessageId: ctx.message.message_id,
       });
-      // immediate: phrase reply (scheduled already phrased in placeMemberItem)
-      if (result.mode === "immediate") {
-        try {
-          const { randomReplyPhrase } = await import("./replyPhrases.js");
-          await bot.api.sendMessage(chatId, randomReplyPhrase());
-        } catch {
-          /* ignore */
-        }
-        try {
-          await bot.api.sendMessage(
-            config.adminId,
-            `👥 Members: posted to channel immediately\nid: <code>${item.id}</code>`,
-            { parse_mode: "HTML" },
-          );
-        } catch {
-          /* ignore */
-        }
-      }
     } catch (err) {
       console.error("member enqueue failed", err);
       // Don't spam channel-DM authors with errors; log for admin

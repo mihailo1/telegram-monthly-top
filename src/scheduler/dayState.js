@@ -110,3 +110,62 @@ export function membersSlotsLeftToday(rec) {
 export function adminCanPostToday(rec) {
   return (rec.admin || 0) === 0 && (rec.members || 0) === 0;
 }
+
+/**
+ * True if admin already used this calendar day (day-state and/or admin queue).
+ * Prefer this over day-state alone — Blob counters can lag; queue is source of truth.
+ * @param {string} day YYYY-MM-DD in APP_TZ
+ * @param {string} [timeZone]
+ */
+export async function adminPostedOnDay(day, timeZone = config.timeZone) {
+  const rec = await getDayRecord(day);
+  if ((rec.admin || 0) > 0) return true;
+
+  try {
+    const { loadQueue } = await import("../queue/store.js");
+    const { items } = await loadQueue();
+    for (const item of items) {
+      if (item.status !== "posted") continue;
+      // Actual wall day of the channel post
+      if (item.postedAt) {
+        const postedDay = localDayString(timeZone, new Date(item.postedAt));
+        if (postedDay === day) return true;
+      }
+      // Fallback: scheduled day recorded on the item
+      if (item.postDay === day) return true;
+    }
+  } catch (err) {
+    console.warn("adminPostedOnDay queue check failed", err?.message || err);
+  }
+  return false;
+}
+
+/**
+ * How many members slots left on a day, using day-state + live queues.
+ * Admin day → 0. Else 4 minus posted/scheduled members for that day.
+ * @param {string} day
+ * @param {string} [timeZone]
+ */
+export async function membersSlotsLeftOnDay(day, timeZone = config.timeZone) {
+  if (await adminPostedOnDay(day, timeZone)) return 0;
+
+  const rec = await getDayRecord(day);
+  let used = rec.members || 0;
+
+  try {
+    const { loadMembersQueue } = await import("../members/store.js");
+    const { items } = await loadMembersQueue();
+    const fromQueue = items.filter(
+      (x) =>
+        (x.status === "scheduled" || x.status === "posted") &&
+        (x.postDay === day ||
+          (x.postedAt &&
+            localDayString(timeZone, new Date(x.postedAt)) === day)),
+    ).length;
+    used = Math.max(used, fromQueue);
+  } catch {
+    /* keep day-state only */
+  }
+
+  return Math.max(0, 4 - used);
+}

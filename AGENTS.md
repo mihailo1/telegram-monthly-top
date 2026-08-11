@@ -6,8 +6,8 @@ Instructions for coding agents. Keep this file updated when architecture or prod
 
 1. **Monthly top** — previous calendar month posts with photos, ranked by **sum of all reaction counts**, publish poll + album after admin confirm.
 2. **Admin queue** — operator uploads media to bot DM; one item/day, random time 10:00–22:00 (`APP_TZ`).
-3. **Members queue** — media from **channel Direct Messages** (and non-admin media on the bot); priority over admin; up to **4/day** if no admin post that day.
-4. **Reply phrases** — random curated quote to the author instead of “you are queued at HH:MM”.
+3. **Members queue** — media from **channel Direct Messages** (and non-admin media on the bot); priority over admin; up to **4/day** if no admin post that day. **Never post to the channel on ingest** — always schedule (cron/tick publishes later). If admin already posted that day → schedule next free day (tomorrow+).
+4. **Reply phrases** — after a member sends photo(s) (1 or album), always auto-reply **once** in channel DMs with a random line from `reply-phrases.json` (instead of “you are queued at HH:MM”).
 5. **Poll → avatar** — `scheduleAvatarJob` on monthly publish; after `AVATAR_POLL_DELAY_DAYS` (default 5), `stopPoll` + `setChatPhoto` with winning option’s photo.
 
 **Preview-first** for monthly top: never auto-publish monthly poll to the channel without ✅.

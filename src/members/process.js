@@ -76,30 +76,97 @@ export async function publishMemberItem(api, chatId, item) {
 }
 
 /**
+ * Channel Direct Messages (monoforum) require direct_messages_topic_id.
+ * Extract from Bot API Message (snake or camel depending on layer/grammy).
+ * @param {object} [msg]
+ * @returns {number|undefined}
+ */
+export function extractDirectMessagesTopicId(msg) {
+  if (!msg || typeof msg !== "object") return undefined;
+  const topic =
+    msg.direct_messages_topic ||
+    msg.directMessagesTopic ||
+    null;
+  const id =
+    topic?.topic_id ??
+    topic?.topicId ??
+    msg.message_thread_id ??
+    msg.messageThreadId;
+  if (id == null || id === "") return undefined;
+  const n = Number(id);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
  * Send a random film phrase to the author (channel DM / monoforum / private).
  * Always used after they send photo(s) — not queue ETA text.
  * @param {import('grammy').Bot} bot
- * @param {{ replyChatId?: string|number, fromUserId?: string|number, replyToMessageId?: number }} opts
- * @returns {Promise<{ ok: boolean, phrase: string }>}
+ * @param {{
+ *   replyChatId?: string|number,
+ *   fromUserId?: string|number,
+ *   replyToMessageId?: number,
+ *   directMessagesTopicId?: number,
+ *   messageThreadId?: number,
+ * }} opts
+ * @returns {Promise<{ ok: boolean, phrase: string, error?: string }>}
  */
 export async function replyAuthorWithPhrase(bot, opts = {}) {
   const { randomReplyPhrase } = await import("../replyPhrases.js");
   const phrase = randomReplyPhrase();
-  const { replyChatId, fromUserId, replyToMessageId } = opts;
-  const extra =
-    replyToMessageId != null
-      ? { reply_parameters: { message_id: replyToMessageId } }
-      : {};
+  const {
+    replyChatId,
+    fromUserId,
+    replyToMessageId,
+    directMessagesTopicId,
+    messageThreadId,
+  } = opts;
+
+  /** @type {Record<string, unknown>} */
+  const extra = {};
+  if (replyToMessageId != null) {
+    extra.reply_parameters = { message_id: replyToMessageId };
+  }
+  // Bot API 9+/10: required for channel Direct Messages chats
+  if (directMessagesTopicId != null) {
+    extra.direct_messages_topic_id = directMessagesTopicId;
+  }
+  // Forum / private topics fallback
+  if (messageThreadId != null) {
+    extra.message_thread_id = messageThreadId;
+  } else if (directMessagesTopicId != null) {
+    // some clients accept topic id as thread id
+    extra.message_thread_id = directMessagesTopicId;
+  }
 
   if (replyChatId) {
     try {
-      await bot.api.sendMessage(replyChatId, phrase, extra);
+      // raw payload so unknown Bot API fields are not stripped by typings
+      await bot.api.raw.sendMessage({
+        chat_id: replyChatId,
+        text: phrase,
+        ...extra,
+      });
       return { ok: true, phrase };
     } catch (err) {
-      console.warn(
-        "phrase via replyChatId failed",
-        err?.message || err,
-      );
+      const msg = err?.message || String(err);
+      console.warn("phrase via replyChatId failed", msg);
+      // retry without reply_parameters (topic alone is enough for DM chats)
+      if (extra.reply_parameters) {
+        try {
+          const { reply_parameters: _rp, ...rest } = extra;
+          await bot.api.raw.sendMessage({
+            chat_id: replyChatId,
+            text: phrase,
+            ...rest,
+          });
+          return { ok: true, phrase };
+        } catch (err2) {
+          console.warn(
+            "phrase via replyChatId (no reply) failed",
+            err2?.message || err2,
+          );
+        }
+      }
     }
   }
   if (fromUserId) {
@@ -108,9 +175,14 @@ export async function replyAuthorWithPhrase(bot, opts = {}) {
       return { ok: true, phrase };
     } catch (err) {
       console.warn("phrase via fromUserId failed", err?.message || err);
+      return { ok: false, phrase, error: err?.message || String(err) };
     }
   }
-  return { ok: false, phrase };
+  return {
+    ok: false,
+    phrase,
+    error: "no replyChatId/fromUserId or channel DM topic missing",
+  };
 }
 
 /**
@@ -132,7 +204,12 @@ async function findNextMembersDay(fromDay, tz) {
  * After ingest: ALWAYS schedule (never post to channel here) + phrase-reply to author.
  * @param {import('./store.js').MemberItem} item
  * @param {import('grammy').Bot} bot
- * @param {{ replyChatId?: string|number, replyToMessageId?: number }} [opts]
+ * @param {{
+ *   replyChatId?: string|number,
+ *   replyToMessageId?: number,
+ *   directMessagesTopicId?: number,
+ *   messageThreadId?: number,
+ * }} [opts]
  */
 export async function placeMemberItem(item, bot, opts = {}) {
   const tz = config.timeZone;
@@ -140,6 +217,8 @@ export async function placeMemberItem(item, bot, opts = {}) {
   if (!channelId) throw new Error("GROUP_CHAT_ID missing");
   const replyChatId = opts.replyChatId;
   const replyToMessageId = opts.replyToMessageId;
+  const directMessagesTopicId = opts.directMessagesTopicId;
+  const messageThreadId = opts.messageThreadId;
 
   const today = localDayString(tz);
   const { hour } = wallClock(tz);
@@ -211,7 +290,18 @@ export async function placeMemberItem(item, bot, opts = {}) {
     replyChatId,
     fromUserId: item.fromUserId,
     replyToMessageId,
+    directMessagesTopicId,
+    messageThreadId,
   });
+  if (!notified.ok) {
+    console.warn(
+      "author phrase not delivered",
+      item.id,
+      notified.error || "",
+      "topic=",
+      directMessagesTopicId,
+    );
+  }
   await updateMemberItem(item.id, { authorNotified: notified.ok });
 
   return {

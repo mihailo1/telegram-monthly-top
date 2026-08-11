@@ -34,6 +34,8 @@ export async function recordMemberAlbumPart(chatId, groupId, part) {
     fromUserId: part.fromUserId || "",
     fromUsername: part.fromUsername || "",
     messageId: part.messageId || 0,
+    directMessagesTopicId: part.directMessagesTopicId ?? null,
+    messageThreadId: part.messageThreadId ?? null,
   });
 
   if (useBlob()) {

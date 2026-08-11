@@ -583,7 +583,10 @@ export function createBot() {
     const {
       appendMemberPost,
     } = await import("./members/store.js");
-    const { placeMemberItem } = await import("./members/process.js");
+    const {
+      placeMemberItem,
+      extractDirectMessagesTopicId,
+    } = await import("./members/process.js");
     const {
       recordMemberAlbumPart,
       scheduleMemberAlbumFinalize,
@@ -594,6 +597,10 @@ export function createBot() {
     const caption = ctx.message.caption || "";
     const groupId = ctx.message.media_group_id;
     const chatId = ctx.chat.id;
+    // Channel Direct Messages: each user conversation is a topic (required to reply)
+    const dmTopicId = extractDirectMessagesTopicId(ctx.message);
+    const threadId =
+      ctx.message.message_thread_id ?? ctx.message.messageThreadId;
 
     try {
       if (groupId) {
@@ -604,6 +611,8 @@ export function createBot() {
           fromUserId,
           fromUsername,
           messageId: ctx.message.message_id,
+          directMessagesTopicId: dmTopicId,
+          messageThreadId: threadId,
         });
         scheduleMemberAlbumFinalize(chatId, groupId, async (parts) => {
           const mediaList = parts.map((p) => ({
@@ -615,6 +624,12 @@ export function createBot() {
           const firstMsgId = parts
             .map((p) => p.messageId)
             .find((id) => id && id > 0);
+          const topicFromParts = parts
+            .map((p) => p.directMessagesTopicId)
+            .find((id) => id != null);
+          const threadFromParts = parts
+            .map((p) => p.messageThreadId)
+            .find((id) => id != null);
           const item = await appendMemberPost({
             media: mediaList,
             caption: cap,
@@ -626,6 +641,8 @@ export function createBot() {
           await placeMemberItem(item, bot, {
             replyChatId: chatId,
             replyToMessageId: firstMsgId || undefined,
+            directMessagesTopicId: topicFromParts ?? dmTopicId,
+            messageThreadId: threadFromParts ?? threadId,
           });
         });
         return;
@@ -642,6 +659,8 @@ export function createBot() {
       await placeMemberItem(item, bot, {
         replyChatId: chatId,
         replyToMessageId: ctx.message.message_id,
+        directMessagesTopicId: dmTopicId,
+        messageThreadId: threadId,
       });
     } catch (err) {
       console.error("member enqueue failed", err);
@@ -682,8 +701,18 @@ export function createBot() {
     if (ctx.message.text?.startsWith("/")) return;
 
     try {
-      const { randomReplyPhrase } = await import("./replyPhrases.js");
-      await ctx.reply(randomReplyPhrase());
+      const {
+        replyAuthorWithPhrase,
+        extractDirectMessagesTopicId,
+      } = await import("./members/process.js");
+      await replyAuthorWithPhrase(bot, {
+        replyChatId: ctx.chat.id,
+        fromUserId: ctx.from?.id,
+        replyToMessageId: ctx.message.message_id,
+        directMessagesTopicId: extractDirectMessagesTopicId(ctx.message),
+        messageThreadId:
+          ctx.message.message_thread_id ?? ctx.message.messageThreadId,
+      });
     } catch (err) {
       console.warn("phrase reply failed", err.message);
     }

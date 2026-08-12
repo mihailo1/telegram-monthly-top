@@ -10,6 +10,8 @@ import { assertBotToken, config } from "./config.js";
 import { loadPending, updatePending } from "./pending.js";
 import { publishAlbumAndPoll } from "./publish.js";
 import {
+  albumInitialWaitMs,
+  albumQuietMs,
   clearAlbumBatch,
   recordAlbumPart,
   runInBackground,
@@ -312,25 +314,40 @@ export function createBot() {
   }
 
   async function finalizeAlbumAck(chatId, groupId) {
-    // Quiet period so all parallel media-group updates land as parts
-    await sleep(3000);
-    let claimed = await tryClaimAlbumFinalize(chatId, groupId, 2500);
+    // Wait for all album frames: GitHub store serializes writes (~3–5s each)
+    const quiet = albumQuietMs();
+    await sleep(albumInitialWaitMs());
+    let claimed = await tryClaimAlbumFinalize(chatId, groupId, quiet);
     if (!claimed) {
-      await sleep(3000);
-      claimed = await tryClaimAlbumFinalize(chatId, groupId, 2000);
+      await sleep(quiet);
+      claimed = await tryClaimAlbumFinalize(chatId, groupId, quiet);
+    }
+    if (!claimed) {
+      // last chance after long settle
+      await sleep(quiet);
+      claimed = await tryClaimAlbumFinalize(chatId, groupId, Math.floor(quiet / 2));
     }
     if (!claimed) return;
     return finishAlbumAck(chatId, groupId, claimed);
   }
 
   async function finishAlbumAck(chatId, groupId, claimed) {
+    // Prefer live count from queue by media_group_id (truth), fallback to claim
+    let uploaded = claimed.count;
+    try {
+      const { countMediaGroupItems } = await import("./queue/store.js");
+      const live = await countMediaGroupItems(groupId);
+      if (live.count > uploaded) uploaded = live.count;
+    } catch {
+      /* keep claimed */
+    }
     const state = await loadQueue();
     const total = countActive(state);
     try {
       await bot.api.sendMessage(
         chatId,
         [
-          `📷 <b>Uploaded ${claimed.count}</b> file(s) to the queue.`,
+          `📷 <b>Uploaded ${uploaded}</b> file(s) to the queue.`,
           `Total in queue: <b>${total}</b>`,
           "",
           "Upload complete ✅",
@@ -548,11 +565,21 @@ export function createBot() {
 
   async function enqueueAdminMedia(ctx, media) {
     try {
-      const { totalQueued } = await appendMedia([media]);
       const groupId = ctx.message.media_group_id;
+      const { totalQueued } = await appendMedia([
+        {
+          ...media,
+          ...(groupId ? { mediaGroupId: groupId } : {}),
+        },
+      ]);
 
       if (groupId) {
-        await recordAlbumPart(ctx.chat.id, groupId);
+        // part file only for lock/legacy; count comes from queue mediaGroupId
+        try {
+          await recordAlbumPart(ctx.chat.id, groupId);
+        } catch (err) {
+          console.warn("recordAlbumPart", err?.message || err);
+        }
         const chatId = ctx.chat.id;
         runInBackground(() => finalizeAlbumAck(chatId, groupId));
         return;

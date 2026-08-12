@@ -25,6 +25,7 @@ const BLOB_PREFIX = "queue/items/";
  * @property {string} id
  * @property {string} fileId
  * @property {MediaType} [mediaType]
+ * @property {string} [mediaGroupId] Telegram media_group_id for album batching/ack
  * @property {string} addedAt
  * @property {QueueItemStatus} status
  * @property {string} [postAt]
@@ -151,14 +152,15 @@ export async function appendPhotos(fileIds) {
 }
 
 /**
- * @param {{ fileId: string, mediaType?: MediaType }[]} media
+ * @param {{ fileId: string, mediaType?: MediaType, mediaGroupId?: string|number }[]} media
  * @returns {Promise<{ added: number, totalQueued: number, state: QueueState }>}
  */
 export async function appendMedia(media) {
-  const now = new Date().toISOString();
   let added = 0;
   for (const m of media) {
     if (!m?.fileId) continue;
+    // unique addedAt per item so album quiet-window can see late arrivals
+    const now = new Date().toISOString();
     /** @type {QueueItem} */
     const item = {
       id: newId(),
@@ -166,6 +168,9 @@ export async function appendMedia(media) {
       mediaType: m.mediaType === "video" ? "video" : "photo",
       addedAt: now,
       status: "queued",
+      ...(m.mediaGroupId != null && String(m.mediaGroupId)
+        ? { mediaGroupId: String(m.mediaGroupId) }
+        : {}),
     };
     await writeItem(item);
     added += 1;
@@ -173,6 +178,24 @@ export async function appendMedia(media) {
   const state = await loadQueue();
   const totalQueued = countActive(state);
   return { added, totalQueued, state };
+}
+
+/**
+ * Count queue items that belong to a Telegram media group (album).
+ * Source of truth for “Uploaded N” ack — more reliable than part files.
+ * @param {string|number} mediaGroupId
+ * @returns {Promise<{ count: number, lastAt: number }>}
+ */
+export async function countMediaGroupItems(mediaGroupId) {
+  const gid = String(mediaGroupId || "");
+  if (!gid) return { count: 0, lastAt: 0 };
+  const state = await loadQueue();
+  const items = state.items.filter((i) => String(i.mediaGroupId || "") === gid);
+  if (!items.length) return { count: 0, lastAt: 0 };
+  const lastAt = Math.max(
+    ...items.map((i) => new Date(i.addedAt || 0).getTime() || 0),
+  );
+  return { count: items.length, lastAt };
 }
 
 /** @param {QueueItem} item */

@@ -109,14 +109,39 @@ export async function readAlbumParts(key) {
 }
 
 /**
- * Try to claim finalize. Returns part stats if this caller won and batch is quiet.
+ * Album quiet timing: GitHub storage serializes writes (~3–5s per photo),
+ * so short quiet windows falsely finalize mid-album.
+ */
+export function albumQuietMs() {
+  if (
+    process.env.STORAGE_BACKEND === "github" ||
+    (!process.env.BLOB_READ_WRITE_TOKEN &&
+      (process.env.GITHUB_TOKEN || process.env.GH_TOKEN))
+  ) {
+    return 10_000;
+  }
+  return 2500;
+}
+
+export function albumInitialWaitMs() {
+  return albumQuietMs() + 2000;
+}
+
+/**
+ * Try to claim finalize. Count comes from queue items with mediaGroupId
+ * (source of truth), not from part files (can lag / finalize early).
  * @returns {Promise<{ count: number } | null>}
  */
-export async function tryClaimAlbumFinalize(chatId, groupId, quietMs = 2500) {
+export async function tryClaimAlbumFinalize(chatId, groupId, quietMs) {
+  const quiet = quietMs ?? albumQuietMs();
   const key = albumKey(chatId, groupId);
-  const { count, lastAt } = await readAlbumParts(key);
-  if (count === 0) return null;
-  if (Date.now() - lastAt < quietMs) return null;
+  const { countMediaGroupItems } = await import("./store.js");
+
+  const snap = await countMediaGroupItems(groupId);
+  // fallback to part files if mediaGroupId not on items (legacy)
+  const parts = snap.count > 0 ? snap : await readAlbumParts(key);
+  if (parts.count === 0) return null;
+  if (Date.now() - parts.lastAt < quiet) return null;
 
   // Claim lock
   if (useRemote()) {
@@ -126,29 +151,32 @@ export async function tryClaimAlbumFinalize(chatId, groupId, quietMs = 2500) {
     if (existing.blobs.some((b) => b.pathname === lockPath)) {
       return null; // already claimed
     }
-    await put(
-      lockPath,
-      JSON.stringify({ claimedAt: Date.now(), count }),
-      {
-        access: "public",
-        contentType: "application/json",
-        addRandomSuffix: false,
-        allowOverwrite: false, // may fail if exists — good
-      },
-    ).catch(() => null);
+    try {
+      await put(
+        lockPath,
+        JSON.stringify({ claimedAt: Date.now(), count: parts.count }),
+        {
+          access: "public",
+          contentType: "application/json",
+          addRandomSuffix: false,
+          allowOverwrite: false,
+        },
+      );
+    } catch {
+      return null;
+    }
 
-    // Re-check someone else won
     const after = await list({ prefix: lockPath });
     const lockBlob = after.blobs.find((b) => b.pathname === lockPath);
     if (!lockBlob) return null;
 
-    // Re-count after quiet (late arrivals)
-    await sleep(400);
-    const again = await readAlbumParts(key);
-    if (Date.now() - again.lastAt < quietMs * 0.5) {
-      // more arrived — release lock and abort (another finalizer will run)
+    // Re-count after settle (late album frames still writing)
+    await sleep(Math.min(1500, Math.floor(quiet * 0.2)));
+    const againSnap = await countMediaGroupItems(groupId);
+    const again = againSnap.count > 0 ? againSnap : await readAlbumParts(key);
+    if (Date.now() - again.lastAt < quiet * 0.45) {
       try {
-        await del(lockBlob.url);
+        await del(lockBlob.pathname || lockBlob.url);
       } catch {
         /* ignore */
       }
@@ -170,8 +198,9 @@ export async function tryClaimAlbumFinalize(chatId, groupId, quietMs = 2500) {
     return null;
   }
   await sleep(400);
-  const again = await readAlbumParts(key);
-  if (Date.now() - again.lastAt < quietMs * 0.5) {
+  const againSnap = await countMediaGroupItems(groupId);
+  const again = againSnap.count > 0 ? againSnap : await readAlbumParts(key);
+  if (Date.now() - again.lastAt < quiet * 0.45) {
     try {
       fs.unlinkSync(lockFile);
     } catch {
@@ -190,7 +219,7 @@ export async function clearAlbumBatch(chatId, groupId) {
       const result = await list({ prefix: `${BLOB_PREFIX}${key}/` });
       for (const blob of result.blobs) {
         try {
-          await del(blob.url);
+          await del(blob.pathname || blob.url);
         } catch {
           /* ignore */
         }

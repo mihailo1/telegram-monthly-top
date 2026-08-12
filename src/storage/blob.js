@@ -150,11 +150,24 @@ async function ghFetch(path, init = {}) {
   return res;
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Encode each path segment for GitHub Contents API. */
+function ghContentPath(pathname) {
+  return String(pathname)
+    .replace(/^\/+/, "")
+    .split("/")
+    .map((s) => encodeURIComponent(s))
+    .join("/");
+}
+
 async function ghGetFile(pathname) {
   const repo = ghRepo();
   const branch = ghBranch();
   const res = await ghFetch(
-    `/repos/${repo}/contents/${encodeURI(pathname)}?ref=${encodeURIComponent(branch)}`,
+    `/repos/${repo}/contents/${ghContentPath(pathname)}?ref=${encodeURIComponent(branch)}`,
   );
   if (res.status === 404) return null;
   if (!res.ok) {
@@ -164,6 +177,12 @@ async function ghGetFile(pathname) {
   return res.json();
 }
 
+/**
+ * Put a file on the store-data branch.
+ * GitHub Contents API serializes commits on a branch — concurrent album parts
+ * race with 409 "is at X but expected Y". Retry with backoff until the branch
+ * tip advances and our write lands.
+ */
 async function ghPut(pathname, body, { allowOverwrite = true } = {}) {
   const repo = ghRepo();
   const branch = ghBranch();
@@ -172,60 +191,80 @@ async function ghPut(pathname, body, { allowOverwrite = true } = {}) {
       ? Buffer.from(body).toString("base64")
       : Buffer.from(JSON.stringify(body)).toString("base64");
 
-  let sha;
-  const existing = await ghGetFile(pathname);
-  if (existing?.sha) {
-    if (!allowOverwrite) {
+  const maxAttempts = 14;
+  let lastDetail = "";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let sha;
+    try {
+      const existing = await ghGetFile(pathname);
+      if (existing?.sha) {
+        if (!allowOverwrite) {
+          const err = new Error("file exists");
+          err.statusCode = 409;
+          throw err;
+        }
+        sha = existing.sha;
+      }
+    } catch (err) {
+      if (err.statusCode === 409 && !allowOverwrite) throw err;
+      // transient get failure — still try put
+      lastDetail = err.message || String(err);
+    }
+
+    const res = await ghFetch(
+      `/repos/${repo}/contents/${ghContentPath(pathname)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          message: `store: put ${pathname}${attempt > 1 ? ` #${attempt}` : ""}`,
+          content,
+          branch,
+          ...(sha ? { sha } : {}),
+        }),
+      },
+    );
+
+    if (res.ok) {
+      const j = await res.json();
+      return {
+        url: j.content?.download_url || ghRawUrl(pathname),
+        pathname,
+      };
+    }
+
+    const t = await res.text();
+    lastDetail = `${res.status} ${t.slice(0, 220)}`;
+
+    // create-or-update conflict / branch moved / secondary rate limit
+    const retriable =
+      res.status === 409 ||
+      res.status === 422 ||
+      res.status === 502 ||
+      res.status === 503 ||
+      res.status === 504 ||
+      (res.status === 403 && /secondary rate|abuse/i.test(t));
+
+    if (!allowOverwrite && (res.status === 409 || res.status === 422)) {
+      // lock files: existence race → treat as "someone else claimed"
       const err = new Error("file exists");
       err.statusCode = 409;
       throw err;
     }
-    sha = existing.sha;
+
+    if (!retriable || attempt === maxAttempts) {
+      throw new Error(`github put ${pathname}: ${lastDetail}`);
+    }
+
+    // jittered exponential backoff (cap ~1.5s)
+    const delay = Math.min(
+      1500,
+      40 * 2 ** Math.min(attempt - 1, 5) + Math.floor(Math.random() * 120),
+    );
+    await sleep(delay);
   }
 
-  const res = await ghFetch(`/repos/${repo}/contents/${encodeURI(pathname)}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      message: `store: put ${pathname}`,
-      content,
-      branch,
-      ...(sha ? { sha } : {}),
-    }),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    // retry once on SHA conflict
-    if (res.status === 409 || res.status === 422) {
-      const again = await ghGetFile(pathname);
-      if (again?.sha) {
-        const res2 = await ghFetch(
-          `/repos/${repo}/contents/${encodeURI(pathname)}`,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              message: `store: put ${pathname} (retry)`,
-              content,
-              branch,
-              sha: again.sha,
-            }),
-          },
-        );
-        if (!res2.ok) {
-          throw new Error(
-            `github put retry ${pathname}: ${res2.status} ${(await res2.text()).slice(0, 200)}`,
-          );
-        }
-        const j2 = await res2.json();
-        return {
-          url: j2.content?.download_url || ghRawUrl(pathname),
-          pathname,
-        };
-      }
-    }
-    throw new Error(`github put ${pathname}: ${res.status} ${t.slice(0, 200)}`);
-  }
-  const j = await res.json();
-  return { url: j.content?.download_url || ghRawUrl(pathname), pathname };
+  throw new Error(`github put ${pathname}: exhausted retries (${lastDetail})`);
 }
 
 function ghRawUrl(pathname) {
@@ -264,22 +303,39 @@ async function ghList(prefix = "", limit = 1000) {
 }
 
 async function ghDel(pathname) {
-  const existing = await ghGetFile(pathname);
-  if (!existing?.sha) return;
   const repo = ghRepo();
   const branch = ghBranch();
-  const res = await ghFetch(`/repos/${repo}/contents/${encodeURI(pathname)}`, {
-    method: "DELETE",
-    body: JSON.stringify({
-      message: `store: del ${pathname}`,
-      sha: existing.sha,
-      branch,
-    }),
-  });
-  if (!res.ok && res.status !== 404) {
-    throw new Error(
-      `github del ${pathname}: ${res.status} ${(await res.text()).slice(0, 200)}`,
+  const maxAttempts = 10;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const existing = await ghGetFile(pathname);
+    if (!existing?.sha) return;
+
+    const res = await ghFetch(
+      `/repos/${repo}/contents/${ghContentPath(pathname)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({
+          message: `store: del ${pathname}${attempt > 1 ? ` #${attempt}` : ""}`,
+          sha: existing.sha,
+          branch,
+        }),
+      },
     );
+    if (res.ok || res.status === 404) return;
+
+    const t = await res.text();
+    const retriable =
+      res.status === 409 ||
+      res.status === 422 ||
+      res.status === 502 ||
+      res.status === 503;
+    if (!retriable || attempt === maxAttempts) {
+      throw new Error(
+        `github del ${pathname}: ${res.status} ${t.slice(0, 200)}`,
+      );
+    }
+    await sleep(40 * attempt + Math.floor(Math.random() * 100));
   }
 }
 

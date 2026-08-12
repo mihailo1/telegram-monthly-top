@@ -119,20 +119,28 @@ function queueItemCaption(item, index, total) {
 }
 
 /**
+ * Relative nav (prev/next) — absolute indices break when the user double-taps
+ * before editMessageMedia finishes (both clicks target the same next index).
  * @param {number} index
  * @param {number} total
  * @param {string} id
  */
 function queueBrowserKeyboard(index, total, id) {
-  const prev = total <= 1 ? index : (index - 1 + total) % total;
-  const next = total <= 1 ? index : (index + 1) % total;
   return new InlineKeyboard()
-    .text("◀️", `qnav:${prev}`)
+    .text("◀️", "qnav:prev")
     .text(`${index + 1}/${total}`, "qnav:noop")
-    .text("▶️", `qnav:${next}`)
+    .text("▶️", "qnav:next")
     .row()
     .text("✅ Post now", `qpostnow:${id}`)
     .text("🗑 Delete", `qdel:${id}`);
+}
+
+/** Parse "· N/M" from browser caption → 0-based index */
+function parseQueueBrowserIndex(caption) {
+  const m = String(caption || "").match(/·\s*(\d+)\s*\/\s*(\d+)/);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n - 1 : 0;
 }
 
 /**
@@ -240,6 +248,9 @@ export function createBot() {
     }
   }
 
+  /** Serialize ◀️▶️ per chat so double-taps don't race the same message */
+  const queueNavLocks = new Map();
+
   /**
    * Open / refresh queue browser at index.
    * @param {import('grammy').Context} ctx
@@ -273,9 +284,7 @@ export function createBot() {
       return;
     }
 
-    let i = index;
-    if (i < 0) i = active.length - 1;
-    if (i >= active.length) i = 0;
+    let i = ((index % active.length) + active.length) % active.length;
     const item = active[i];
     const caption = queueItemCaption(item, i, active.length);
     const keyboard = queueBrowserKeyboard(i, active.length, item.id);
@@ -294,7 +303,27 @@ export function createBot() {
         );
         return;
       } catch (err) {
-        console.warn("editMessageMedia failed, resend", err.message);
+        const msg = String(err?.message || err || "");
+        // Same media / race: still refresh caption + buttons
+        if (/not modified/i.test(msg)) {
+          try {
+            await ctx.editMessageCaption({
+              caption,
+              parse_mode: "HTML",
+              reply_markup: keyboard,
+            });
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
+        console.warn("editMessageMedia failed, resend", msg);
+        // Drop stale message so user doesn't click old ◀️▶️
+        try {
+          await ctx.deleteMessage();
+        } catch {
+          /* ignore */
+        }
       }
     }
 
@@ -823,20 +852,42 @@ export function createBot() {
       return;
     }
 
-    // Admin queue browser navigation
+    // Admin queue browser navigation (relative prev/next)
     if (data.startsWith("qnav:")) {
       const raw = data.slice("qnav:".length);
       if (raw === "noop") {
         await ctx.answerCallbackQuery();
         return;
       }
-      const index = Number(raw);
-      if (!Number.isFinite(index)) {
-        await ctx.answerCallbackQuery({ text: "bad index" });
+
+      const chatId = String(ctx.chat?.id || ctx.from?.id || "");
+      if (chatId && queueNavLocks.get(chatId)) {
+        // Previous nav still running — ack so Telegram doesn't spin, ignore tap
+        await ctx.answerCallbackQuery({ text: "…" });
         return;
       }
-      await ctx.answerCallbackQuery();
-      await showQueueBrowser(ctx, index, "edit");
+      if (chatId) queueNavLocks.set(chatId, true);
+
+      try {
+        const caption = ctx.callbackQuery.message?.caption || "";
+        const cur = parseQueueBrowserIndex(caption);
+        let index = cur;
+        if (raw === "prev" || raw === "-1") {
+          index = cur - 1;
+        } else if (raw === "next" || raw === "+1") {
+          index = cur + 1;
+        } else if (Number.isFinite(Number(raw))) {
+          // legacy absolute index from old keyboards
+          index = Number(raw);
+        } else {
+          await ctx.answerCallbackQuery({ text: "bad nav" });
+          return;
+        }
+        await ctx.answerCallbackQuery();
+        await showQueueBrowser(ctx, index, "edit");
+      } finally {
+        if (chatId) queueNavLocks.delete(chatId);
+      }
       return;
     }
 

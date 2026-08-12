@@ -63,6 +63,7 @@ function newId() {
 /** @param {QueueItem} item */
 async function writeItem(item) {
   const body = JSON.stringify(item);
+  invalidateQueueCache();
 
   if (useRemote()) {
     await storePut(`${BLOB_PREFIX}${item.id}.json`, body, {
@@ -83,18 +84,31 @@ async function listAllItems() {
   if (useRemote()) {
     try {
       const result = await storeList({ prefix: BLOB_PREFIX });
-      const items = [];
-      for (const blob of result.blobs) {
-        if (!blob.pathname.endsWith(".json")) continue;
-        if (blob.pathname.includes("_healthcheck")) continue;
-        try {
-          const item = await getJson(blob.pathname);
-          if (item?.id && item?.fileId) items.push(item);
-        } catch (err) {
-          console.warn("listAllItems skip", blob.pathname, err?.message || err);
-        }
-      }
-      return items;
+      const paths = result.blobs
+        .map((b) => b.pathname)
+        .filter(
+          (p) =>
+            p.endsWith(".json") &&
+            !p.includes("_healthcheck") &&
+            !p.includes("/lock"),
+        );
+      // Parallel fetches — sequential GitHub GETs make ◀️▶️ feel broken
+      const settled = await Promise.all(
+        paths.map(async (pathname) => {
+          try {
+            const item = await getJson(pathname);
+            if (item?.id && item?.fileId) return item;
+          } catch (err) {
+            console.warn(
+              "listAllItems skip",
+              pathname,
+              err?.message || err,
+            );
+          }
+          return null;
+        }),
+      );
+      return /** @type {QueueItem[]} */ (settled.filter(Boolean));
     } catch (err) {
       console.error("listAllItems remote:", err.message ?? err);
       return [];
@@ -123,14 +137,35 @@ function sortItems(items) {
   });
 }
 
-/** @returns {Promise<QueueState>} */
-export async function loadQueue() {
+/** @type {{ at: number, state: QueueState } | null} */
+let queueCache = null;
+const QUEUE_CACHE_MS = 2500;
+
+/** Drop short-lived queue cache (call after any write). */
+export function invalidateQueueCache() {
+  queueCache = null;
+}
+
+/**
+ * @param {{ force?: boolean }} [opts]
+ * @returns {Promise<QueueState>}
+ */
+export async function loadQueue(opts = {}) {
+  if (
+    !opts.force &&
+    queueCache &&
+    Date.now() - queueCache.at < QUEUE_CACHE_MS
+  ) {
+    return queueCache.state;
+  }
   const items = sortItems(await listAllItems());
-  return {
+  const state = {
     version: 2,
     items,
     updatedAt: new Date().toISOString(),
   };
+  queueCache = { at: Date.now(), state };
+  return state;
 }
 
 /**

@@ -213,9 +213,13 @@ async function tryClaimNotify(itemId) {
   if (!item || item.notified) return false;
 
   const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
+  if (
+    process.env.BLOB_READ_WRITE_TOKEN ||
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN
+  ) {
     try {
-      const { list, put } = await import("@vercel/blob");
+      const { list, put } = await import("../storage/blob.js");
       const pathname = `queue/notify-lock/${itemId}.json`;
       const existing = await list({ prefix: pathname });
       if (existing.blobs.some((b) => b.pathname === pathname)) return false;
@@ -245,13 +249,17 @@ async function tryClaimNotify(itemId) {
 }
 
 async function releaseNotifyClaim(itemId) {
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
+  if (
+    process.env.BLOB_READ_WRITE_TOKEN ||
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN
+  ) {
     try {
-      const { list, del } = await import("@vercel/blob");
+      const { list, del } = await import("../storage/blob.js");
       const pathname = `queue/notify-lock/${itemId}.json`;
       const existing = await list({ prefix: pathname });
       for (const b of existing.blobs) {
-        if (b.pathname === pathname) await del(b.url);
+        if (b.pathname === pathname) await del(b.pathname || b.url);
       }
     } catch {
       /* ignore */

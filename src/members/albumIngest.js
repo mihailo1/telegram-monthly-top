@@ -9,8 +9,12 @@ import { runInBackground, sleep } from "../queue/albumBatch.js";
 const LOCAL_ROOT = path.resolve("./data/members/albums");
 const BLOB_PREFIX = "members/albums/";
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 function keyOf(chatId, groupId) {
@@ -38,8 +42,8 @@ export async function recordMemberAlbumPart(chatId, groupId, part) {
     messageThreadId: part.messageThreadId ?? null,
   });
 
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { put } = await import("../storage/blob.js");
     await put(`${BLOB_PREFIX}${key}/part-${partId}.json`, body, {
       access: "public",
       contentType: "application/json",
@@ -55,14 +59,14 @@ export async function recordMemberAlbumPart(chatId, groupId, part) {
 }
 
 async function listParts(key) {
-  if (useBlob()) {
-    const { list } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { list } = await import("../storage/blob.js");
     const result = await list({ prefix: `${BLOB_PREFIX}${key}/part-` });
     const parts = [];
     for (const blob of result.blobs) {
       try {
-        const res = await fetch(blob.url, { cache: "no-store" });
-        if (res.ok) parts.push(await res.json());
+        const { getJson } = await import("../storage/blob.js");
+        parts.push(await getJson(blob.pathname));
       } catch {
         /* skip */
       }
@@ -90,8 +94,8 @@ async function tryClaim(key, quietMs) {
   const lastAt = Math.max(...parts.map((p) => p.at || 0));
   if (Date.now() - lastAt < quietMs) return null;
 
-  if (useBlob()) {
-    const { list, put, del } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { list, put, del } = await import("../storage/blob.js");
     const lockPath = `${BLOB_PREFIX}${key}/lock.json`;
     const existing = await list({ prefix: lockPath });
     if (existing.blobs.some((b) => b.pathname === lockPath)) return null;
@@ -146,9 +150,9 @@ async function tryClaim(key, quietMs) {
 }
 
 async function clearKey(key) {
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list, del } = await import("@vercel/blob");
+      const { list, del } = await import("../storage/blob.js");
       const result = await list({ prefix: `${BLOB_PREFIX}${key}/` });
       for (const b of result.blobs) {
         try {

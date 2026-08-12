@@ -4,6 +4,12 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import {
+  del as storeDel,
+  getJson,
+  list as storeList,
+  put as storePut,
+} from "../storage/blob.js";
 
 const LOCAL_DIR = path.resolve("./data/members/items");
 const BLOB_PREFIX = "members/items/";
@@ -33,8 +39,12 @@ const SEEN_PREFIX = "members/seen/";
  * @property {string} [postedAt]
  */
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 function newId() {
@@ -44,9 +54,8 @@ function newId() {
 /** @param {MemberItem} item */
 async function writeItem(item) {
   const body = JSON.stringify(item);
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(`${BLOB_PREFIX}${item.id}.json`, body, {
+  if (useRemote()) {
+    await storePut(`${BLOB_PREFIX}${item.id}.json`, body, {
       access: "public",
       contentType: "application/json",
       addRandomSuffix: false,
@@ -59,17 +68,14 @@ async function writeItem(item) {
 }
 
 async function listItems() {
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list } = await import("@vercel/blob");
-      const result = await list({ prefix: BLOB_PREFIX });
+      const result = await storeList({ prefix: BLOB_PREFIX });
       const items = [];
       for (const blob of result.blobs) {
         if (!blob.pathname.endsWith(".json")) continue;
         try {
-          const res = await fetch(blob.url, { cache: "no-store" });
-          if (!res.ok) continue;
-          const item = await res.json();
+          const item = await getJson(blob.pathname);
           if (item?.id && item?.media?.length) items.push(item);
         } catch {
           /* skip */
@@ -125,21 +131,20 @@ export async function updateMemberItem(id, patch) {
  * @param {string} id
  */
 export async function removeMemberItem(id) {
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list, del } = await import("@vercel/blob");
       const pathname = `${BLOB_PREFIX}${id}.json`;
-      const result = await list({ prefix: pathname });
+      const result = await storeList({ prefix: pathname });
       let removed = false;
       for (const blob of result.blobs) {
         if (blob.pathname === pathname) {
-          await del(blob.url);
+          await storeDel(blob.pathname);
           removed = true;
         }
       }
       return removed;
     } catch (err) {
-      console.error("removeMemberItem blob", err.message);
+      console.error("removeMemberItem remote", err.message);
       return false;
     }
   }
@@ -199,11 +204,10 @@ export async function appendMemberPost(input) {
 /** @param {string} sourceKey */
 export async function wasSourceSeen(sourceKey) {
   if (!sourceKey) return false;
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list } = await import("@vercel/blob");
       const pathname = `${SEEN_PREFIX}${sourceKey}.json`;
-      const result = await list({ prefix: pathname });
+      const result = await storeList({ prefix: pathname });
       return result.blobs.some((b) => b.pathname === pathname);
     } catch {
       return false;
@@ -217,9 +221,8 @@ export async function wasSourceSeen(sourceKey) {
 export async function markSourceSeen(sourceKey) {
   if (!sourceKey) return;
   const body = JSON.stringify({ at: new Date().toISOString() });
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(`${SEEN_PREFIX}${sourceKey}.json`, body, {
+  if (useRemote()) {
+    await storePut(`${SEEN_PREFIX}${sourceKey}.json`, body, {
       access: "public",
       contentType: "application/json",
       addRandomSuffix: false,

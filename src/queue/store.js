@@ -1,17 +1,18 @@
 /**
  * Daily photo queue storage (concurrency-safe for album uploads).
  *
- * Each photo is its own record (Blob object or local file), so parallel
- * webhook invocations for a media group cannot overwrite each other.
+ * Each photo is its own record, so parallel webhook invocations for a
+ * media group cannot overwrite each other.
  *
  * Local:  data/queue/items/<id>.json
- * Vercel: Blob queue/items/<id>.json
+ * Remote: Vercel Blob or GitHub store-data branch (see src/storage/blob.js)
  *
  * Media are Telegram file_ids (bot can re-send them to the channel).
  * mediaType: "photo" | "video" (default photo for older items).
  */
 import fs from "node:fs";
 import path from "node:path";
+import { getJson, list as storeList, put as storePut } from "../storage/blob.js";
 
 const LOCAL_DIR = path.resolve("./data/queue/items");
 const BLOB_PREFIX = "queue/items/";
@@ -41,8 +42,12 @@ const BLOB_PREFIX = "queue/items/";
  * @property {string} updatedAt
  */
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 /** @returns {QueueState} */
@@ -58,9 +63,8 @@ function newId() {
 async function writeItem(item) {
   const body = JSON.stringify(item);
 
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(`${BLOB_PREFIX}${item.id}.json`, body, {
+  if (useRemote()) {
+    await storePut(`${BLOB_PREFIX}${item.id}.json`, body, {
       access: "public",
       contentType: "application/json",
       addRandomSuffix: false,
@@ -75,25 +79,23 @@ async function writeItem(item) {
 
 /** @returns {Promise<QueueItem[]>} */
 async function listAllItems() {
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list } = await import("@vercel/blob");
-      const result = await list({ prefix: BLOB_PREFIX });
+      const result = await storeList({ prefix: BLOB_PREFIX });
       const items = [];
       for (const blob of result.blobs) {
         if (!blob.pathname.endsWith(".json")) continue;
+        if (blob.pathname.includes("_healthcheck")) continue;
         try {
-          const res = await fetch(blob.url, { cache: "no-store" });
-          if (!res.ok) continue;
-          const item = await res.json();
+          const item = await getJson(blob.pathname);
           if (item?.id && item?.fileId) items.push(item);
-        } catch {
-          /* skip bad object */
+        } catch (err) {
+          console.warn("listAllItems skip", blob.pathname, err?.message || err);
         }
       }
       return items;
     } catch (err) {
-      console.error("listAllItems blob:", err.message ?? err);
+      console.error("listAllItems remote:", err.message ?? err);
       return [];
     }
   }

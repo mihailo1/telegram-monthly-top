@@ -13,8 +13,12 @@ const BLOB_PREFIX = "monthly/avatar-jobs/";
 const LOCAL_DIR = path.resolve("./data/monthly/avatar-jobs");
 const DEFAULT_DELAY_DAYS = Number(process.env.AVATAR_POLL_DELAY_DAYS || 5);
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 /**
@@ -42,8 +46,8 @@ function jobPath(id) {
 /** @param {AvatarJob} job */
 async function writeJob(job) {
   const body = JSON.stringify(job, null, 2);
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { put } = await import("../storage/blob.js");
     await put(jobPath(job.id), body, {
       access: "public",
       contentType: "application/json",
@@ -58,16 +62,16 @@ async function writeJob(job) {
 
 /** @returns {Promise<AvatarJob[]>} */
 async function listJobs() {
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list } = await import("@vercel/blob");
+      const { list } = await import("../storage/blob.js");
       const result = await list({ prefix: BLOB_PREFIX });
       const jobs = [];
       for (const blob of result.blobs) {
         if (!blob.pathname.endsWith(".json")) continue;
         try {
-          const res = await fetch(blob.url, { cache: "no-store" });
-          if (res.ok) jobs.push(await res.json());
+          const { getJson } = await import("../storage/blob.js");
+          jobs.push(await getJson(blob.pathname));
         } catch {
           /* skip */
         }

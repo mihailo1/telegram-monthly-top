@@ -15,8 +15,12 @@ import path from "node:path";
 const LOCAL_ROOT = path.resolve("./data/queue/albums");
 const BLOB_PREFIX = "queue/albums/";
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 export function albumKey(chatId, groupId) {
@@ -48,8 +52,8 @@ export async function recordAlbumPart(chatId, groupId) {
   const partId = newPartId();
   const body = JSON.stringify({ partId, at: Date.now() });
 
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { put } = await import("../storage/blob.js");
     await put(partPathname(key, partId), body, {
       access: "public",
       contentType: "application/json",
@@ -69,8 +73,8 @@ export async function recordAlbumPart(chatId, groupId) {
  * @returns {Promise<{ count: number, lastAt: number }>}
  */
 export async function readAlbumParts(key) {
-  if (useBlob()) {
-    const { list } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { list } = await import("../storage/blob.js");
     const result = await list({ prefix: `${BLOB_PREFIX}${key}/part-` });
     let lastAt = 0;
     let count = 0;
@@ -78,11 +82,9 @@ export async function readAlbumParts(key) {
       if (!blob.pathname.includes("/part-")) continue;
       count += 1;
       try {
-        const res = await fetch(blob.url, { cache: "no-store" });
-        if (res.ok) {
-          const j = await res.json();
-          if (j?.at > lastAt) lastAt = j.at;
-        }
+        const { getJson } = await import("../storage/blob.js");
+        const j = await getJson(blob.pathname);
+        if (j?.at > lastAt) lastAt = j.at;
       } catch {
         /* count file even if body bad */
         lastAt = Math.max(lastAt, Date.now());
@@ -117,8 +119,8 @@ export async function tryClaimAlbumFinalize(chatId, groupId, quietMs = 2500) {
   if (Date.now() - lastAt < quietMs) return null;
 
   // Claim lock
-  if (useBlob()) {
-    const { list, put, del } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { list, put, del } = await import("../storage/blob.js");
     const lockPath = lockPathname(key);
     const existing = await list({ prefix: lockPath });
     if (existing.blobs.some((b) => b.pathname === lockPath)) {
@@ -182,9 +184,9 @@ export async function tryClaimAlbumFinalize(chatId, groupId, quietMs = 2500) {
 
 export async function clearAlbumBatch(chatId, groupId) {
   const key = albumKey(chatId, groupId);
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list, del } = await import("@vercel/blob");
+      const { list, del } = await import("../storage/blob.js");
       const result = await list({ prefix: `${BLOB_PREFIX}${key}/` });
       for (const blob of result.blobs) {
         try {

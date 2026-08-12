@@ -6,12 +6,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { localDayString } from "../queue/time.js";
 import { config } from "../config.js";
+import { getJson, list as storeList, put as storePut } from "../storage/blob.js";
 
 const LOCAL_PATH = path.resolve("./data/day-state.json");
 const BLOB_KEY = "scheduler/day-state.json";
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 /**
@@ -28,15 +33,12 @@ function useBlob() {
 
 /** @returns {Promise<DayStateFile>} */
 export async function loadDayState() {
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list } = await import("@vercel/blob");
-      const result = await list({ prefix: BLOB_KEY });
+      const result = await storeList({ prefix: BLOB_KEY });
       const blob = result.blobs.find((b) => b.pathname === BLOB_KEY);
       if (!blob) return { days: {}, updatedAt: new Date().toISOString() };
-      const res = await fetch(blob.url, { cache: "no-store" });
-      if (!res.ok) return { days: {}, updatedAt: new Date().toISOString() };
-      return await res.json();
+      return await getJson(blob.pathname);
     } catch {
       return { days: {}, updatedAt: new Date().toISOString() };
     }
@@ -55,9 +57,8 @@ export async function loadDayState() {
 export async function saveDayState(state) {
   state.updatedAt = new Date().toISOString();
   const body = JSON.stringify(state, null, 2);
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
-    await put(BLOB_KEY, body, {
+  if (useRemote()) {
+    await storePut(BLOB_KEY, body, {
       access: "public",
       contentType: "application/json",
       addRandomSuffix: false,

@@ -7,8 +7,12 @@ import path from "node:path";
 const LOCAL_DIR = path.resolve("./data/members/browser");
 const BLOB_PREFIX = "members/browser/";
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 /**
@@ -26,16 +30,15 @@ function key(adminId) {
 /** @param {string|number} adminId */
 export async function loadBrowserSession(adminId) {
   const k = key(adminId);
-  if (useBlob()) {
+  if (useRemote()) {
     try {
-      const { list } = await import("@vercel/blob");
+      const { list } = await import("../storage/blob.js");
       const pathname = `${BLOB_PREFIX}${k}.json`;
       const result = await list({ prefix: pathname });
       const blob = result.blobs.find((b) => b.pathname === pathname);
       if (!blob) return null;
-      const res = await fetch(blob.url, { cache: "no-store" });
-      if (!res.ok) return null;
-      return res.json();
+      const { getJson } = await import("../storage/blob.js");
+      return await getJson(blob.pathname);
     } catch {
       return null;
     }
@@ -56,8 +59,8 @@ export async function loadBrowserSession(adminId) {
 export async function saveBrowserSession(adminId, session) {
   const k = key(adminId);
   const body = JSON.stringify(session);
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { put } = await import("../storage/blob.js");
     await put(`${BLOB_PREFIX}${k}.json`, body, {
       access: "public",
       contentType: "application/json",

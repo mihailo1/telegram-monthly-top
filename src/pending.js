@@ -30,16 +30,20 @@ const PENDING_ROOT = path.resolve("./data/pending");
  * @property {number} [adminMessageId]
  */
 
-function useBlob() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+function useRemote() {
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN,
+  );
 }
 
 /**
  * @param {PendingMeta} meta
  */
 export async function savePendingMeta(meta) {
-  if (useBlob()) {
-    const { put } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { put } = await import("./storage/blob.js");
     await put(`pending/${meta.id}.json`, JSON.stringify(meta), {
       access: "public", // meta is not secret; file_ids are bound to bot
       contentType: "application/json",
@@ -102,15 +106,14 @@ export async function createPending(input) {
  * @returns {Promise<PendingMeta | null>}
  */
 export async function loadPending(id) {
-  if (useBlob()) {
-    const { list } = await import("@vercel/blob");
+  if (useRemote()) {
+    const { list } = await import("./storage/blob.js");
     // Direct URL pattern — list by prefix
     const result = await list({ prefix: `pending/${id}.json` });
     const blob = result.blobs.find((b) => b.pathname === `pending/${id}.json`);
     if (!blob) return null;
-    const res = await fetch(blob.url);
-    if (!res.ok) return null;
-    return res.json();
+    const { getJson } = await import("./storage/blob.js");
+    return await getJson(blob.pathname);
   }
 
   const metaPath = path.join(PENDING_ROOT, `${id}.json`);

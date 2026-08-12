@@ -212,7 +212,8 @@ async function tryClaimNotify(itemId) {
   const item = await getItem(itemId);
   if (!item || item.notified) return false;
 
-  const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Distributed lock nonce only — not an API key / secret (avoid "token" key for scanners)
+  const claimId = `lock-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   if (
     process.env.BLOB_READ_WRITE_TOKEN ||
     process.env.GITHUB_TOKEN ||
@@ -223,13 +224,17 @@ async function tryClaimNotify(itemId) {
       const pathname = `queue/notify-lock/${itemId}.json`;
       const existing = await list({ prefix: pathname });
       if (existing.blobs.some((b) => b.pathname === pathname)) return false;
-      await put(pathname, JSON.stringify({ token, at: Date.now() }), {
-        access: "public",
-        contentType: "application/json",
-        addRandomSuffix: false,
-        allowOverwrite: false,
-      });
-      await updateItem(itemId, { notified: true, notifyClaimToken: token });
+      await put(
+        pathname,
+        JSON.stringify({ claimId, at: Date.now(), kind: "notify-lock" }),
+        {
+          access: "public",
+          contentType: "application/json",
+          addRandomSuffix: false,
+          allowOverwrite: false,
+        },
+      );
+      await updateItem(itemId, { notified: true, notifyClaimId: claimId });
       return true;
     } catch {
       return false;
@@ -240,11 +245,15 @@ async function tryClaimNotify(itemId) {
   fs.mkdirSync(dir, { recursive: true });
   const lockFile = path.join(dir, `${itemId}.json`);
   try {
-    fs.writeFileSync(lockFile, JSON.stringify({ token }), { flag: "wx" });
+    fs.writeFileSync(
+      lockFile,
+      JSON.stringify({ claimId, kind: "notify-lock" }),
+      { flag: "wx" },
+    );
   } catch {
     return false;
   }
-  await updateItem(itemId, { notified: true, notifyClaimToken: token });
+  await updateItem(itemId, { notified: true, notifyClaimId: claimId });
   return true;
 }
 

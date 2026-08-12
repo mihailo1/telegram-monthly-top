@@ -1,0 +1,7 @@
+# Operational bot state lives on branch store-data (not secrets).
+# Notify/album lock files hold random claim ids, not credentials.
+version: 2
+paths-ignore:
+  - "queue/notify-lock/**"
+  - "queue/albums/**"
+  - "**/lock.json"

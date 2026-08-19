@@ -1,0 +1,16 @@
+{
+  "id": "backfill-july-mt009bhw",
+  "status": "done",
+  "createdAt": "2026-08-10T14:49:19.000Z",
+  "processAfter": "2026-08-19T11:25:32.660Z",
+  "chatId": "-1001173228085",
+  "channelUsername": "krasiviyded",
+  "pollMessageId": 1721,
+  "photoFileIds": [],
+  "rangeLabel": "July 2026",
+  "pollQuestion": "Лучший дед июля 👴",
+  "winnerIndex": 1,
+  "winnerVotes": 6,
+  "completedAt": "2026-08-19T11:25:32.660Z",
+  "note": "setChatPhoto without stopPoll; option 2️⃣ from msg 1723"
+}

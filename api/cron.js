@@ -1,6 +1,7 @@
 /**
  * Vercel Cron + manual monthly preview → admin DM.
- * Schedule: vercel.json → 06:00 UTC on the 6th (~09:00 MSK).
+ * Schedule: vercel.json → 06:00 UTC on the 5th (~09:00 MSK).
+ * Sends monthly top preview to ADMIN_ID for ✅/❌ approval.
  *
  * Auth: Authorization: Bearer CRON_SECRET  OR  ?secret=CRON_SECRET
  * Vercel Cron sends header x-vercel-cron: 1

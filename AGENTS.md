@@ -4,7 +4,7 @@ Instructions for coding agents. Keep this file updated when architecture or prod
 
 ## Product goals
 
-1. **Monthly top** — previous calendar month posts with photos, ranked by **sum of all reaction counts**, publish poll + album after admin confirm.
+1. **Monthly top** — on the **5th** (`/api/cron` 06:00 UTC ≈ 09:00 MSK) preview previous calendar month posts with photos, ranked by **sum of all reaction counts**, to admin DM; publish poll + album only after ✅.
 2. **Admin queue** — operator uploads media to bot DM; one item/day, random time 10:00–22:00 (`APP_TZ`).
 3. **Members queue** — media from **channel Direct Messages** (and non-admin media on the bot); priority over admin; up to **4/day** if no admin post that day. **Never post to the channel on ingest** — always schedule (cron/tick publishes later). If admin already posted that day → schedule next free day (tomorrow+).
 4. **Reply phrases** — after a member sends photo(s) (1 or album), always auto-reply **once** in channel DMs with a random line from `reply-phrases.json` (instead of “you are queued at HH:MM”).

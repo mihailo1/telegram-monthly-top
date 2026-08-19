@@ -61,10 +61,12 @@ Do **not** run local `npm run bot` at the same time as the production webhook.
 
 | Path | Schedule | Role |
 |------|----------|------|
-| `/api/cron` | `0 6 6 * *` | Monthly preview (~09:00 MSK on the 6th) |
-| `/api/queue-cron` | `0 7 * * *` | Daily backup tick (Hobby-friendly) |
+| `/api/cron` | `0 6 5 * *` | Monthly preview → admin DM for ✅/❌ (~09:00 MSK on the **5th**) |
+| `/api/queue-cron` | `0 7 * * *` | Daily tick: queues + **avatar jobs** (Hobby-friendly) |
 
-**Hobby plan** only allows once-per-day crons. For random 10:00–22:00 posts and timely members ingest, call `/api/queue-cron` every **15 minutes** via:
+After you ✅ publish a monthly poll, `scheduleAvatarJob` stores a job for **+5 days** (`AVATAR_POLL_DELAY_DAYS`, default 5). `queue-cron` (and the 15‑minute GitHub Actions tick) then runs `stopPoll` + `setChatPhoto` with the winning option.
+
+**Hobby plan** only allows once-per-day platform crons. For random 10:00–22:00 posts and timely avatar resolution, call `/api/queue-cron` every **15 minutes** via:
 
 - [cron-job.org](https://cron-job.org), or
 - GitHub Actions workflow `.github/workflows/queue-tick.yml`  

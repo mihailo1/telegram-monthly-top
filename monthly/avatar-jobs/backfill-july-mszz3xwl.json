@@ -1,0 +1,16 @@
+{
+  "id": "backfill-july-mszz3xwl",
+  "status": "done",
+  "createdAt": "2026-08-10T14:49:19.000Z",
+  "processAfter": "2026-08-19T10:53:22.149Z",
+  "chatId": "-1001173228085",
+  "channelUsername": "krasiviyded",
+  "pollMessageId": 1721,
+  "photoFileIds": [],
+  "rangeLabel": "July 2026",
+  "pollQuestion": "Лучший дед июля 👴",
+  "winnerIndex": 1,
+  "winnerVotes": 6,
+  "completedAt": "2026-08-19T10:53:22.149Z",
+  "note": "Backfilled earlier: setChatPhoto without stopPoll; winner option 2️⃣ from channel msg 1723. Audit record saved after Blob→GitHub migration."
+}

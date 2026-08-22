@@ -30,6 +30,9 @@ const SEEN_PREFIX = "members/seen/";
  * @property {string} [fromUserId]
  * @property {string} [fromUsername]
  * @property {string} [sourceKey]  monoforum msg key for dedupe
+ * @property {string|number} [sourceChatId]  DM/monoforum chat for forwardMessage
+ * @property {number[]} [sourceMessageIds]  original message ids (album = many)
+ * @property {number} [directMessagesTopicId]
  * @property {string} addedAt
  * @property {MemberStatus} status
  * @property {string} [postAt]
@@ -181,11 +184,17 @@ export function getMembersScheduled(items) {
  * @param {string} [input.fromUserId]
  * @param {string} [input.fromUsername]
  * @param {string} [input.sourceKey]
+ * @param {string|number} [input.sourceChatId]
+ * @param {number[]} [input.sourceMessageIds]
+ * @param {number} [input.directMessagesTopicId]
  */
 export async function appendMemberPost(input) {
   if (!input.media?.length || input.media.length > 10) {
     throw new Error("media must be 1–10 items");
   }
+  const sourceMessageIds = Array.isArray(input.sourceMessageIds)
+    ? input.sourceMessageIds.map(Number).filter((n) => n > 0)
+    : [];
   /** @type {MemberItem} */
   const item = {
     id: newId(),
@@ -194,6 +203,9 @@ export async function appendMemberPost(input) {
     fromUserId: input.fromUserId || "",
     fromUsername: input.fromUsername || "",
     sourceKey: input.sourceKey || "",
+    sourceChatId: input.sourceChatId ?? "",
+    sourceMessageIds,
+    directMessagesTopicId: input.directMessagesTopicId ?? undefined,
     addedAt: new Date().toISOString(),
     status: "queued",
   };

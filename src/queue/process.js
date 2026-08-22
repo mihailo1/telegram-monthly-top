@@ -21,6 +21,12 @@ import {
   incrementDayPost,
 } from "../scheduler/dayState.js";
 import {
+  loadChannelPulse,
+  markChannelPosted,
+  nextAllowedAt,
+  PULSE_GAP_MS,
+} from "../scheduler/channelPulse.js";
+import {
   countActive,
   getItem,
   getScheduled,
@@ -83,6 +89,11 @@ export async function processQueueTick(opts = {}) {
     summary.actions.push(`admin_paused_members:${membersActive}`);
   }
 
+  // Also defer admin if channel pulse says a post landed in the last hour
+  // (typically members forward) or a members item is due before admin.
+  const pulse = await loadChannelPulse();
+  const pulseAllowed = nextAllowedAt(pulse).getTime();
+
   // --- Post if due (admin) ---
   let scheduled = getScheduled(state);
   if (
@@ -92,7 +103,18 @@ export async function processQueueTick(opts = {}) {
   ) {
     const today = localDayString(tz);
     const dayRec = await getDayRecord(today);
-    if (!adminCanPostToday(dayRec)) {
+
+    // Push past recent members channel post (+1h spacing)
+    if (pulseAllowed > Date.now() + 2000) {
+      const postAt = new Date(pulseAllowed);
+      await updateItem(scheduled.id, {
+        postDay: localDayString(tz, postAt),
+        postAt: postAt.toISOString(),
+        notified: false,
+      });
+      summary.actions.push(`admin_defer_pulse:${scheduled.id}`);
+    } else if (!adminCanPostToday(dayRec)) {
+      // Still respect 1 admin/day
       const nextDay = addDays(today, 1);
       const postAt = randomPostAt(nextDay, tz);
       await updateItem(scheduled.id, {
@@ -102,16 +124,35 @@ export async function processQueueTick(opts = {}) {
       });
       summary.actions.push(`admin_defer_day:${scheduled.id}`);
     } else {
-      const postResult = await postScheduledNow(scheduled.id, bot, {
-        notifyAdmin: true,
-      });
-      if (!postResult.ok) {
-        summary.actions.push(`post_error:${postResult.error}`);
-        if (postResult.error !== "no_channel") {
-          return summary;
-        }
+      // If any members scheduled earlier/same window, push admin after them
+      const membersSoon = membersState.items
+        .filter((i) => i.status === "scheduled" && i.postAt)
+        .map((i) => new Date(i.postAt).getTime())
+        .filter((t) => Number.isFinite(t));
+      const soonestMembers = membersSoon.length ? Math.min(...membersSoon) : null;
+      if (
+        soonestMembers != null &&
+        soonestMembers <= Date.now() + PULSE_GAP_MS
+      ) {
+        const postAt = new Date(soonestMembers + PULSE_GAP_MS);
+        await updateItem(scheduled.id, {
+          postDay: localDayString(tz, postAt),
+          postAt: postAt.toISOString(),
+          notified: false,
+        });
+        summary.actions.push(`admin_defer_members_due:${scheduled.id}`);
       } else {
-        summary.actions.push(`posted:${scheduled.id}`);
+        const postResult = await postScheduledNow(scheduled.id, bot, {
+          notifyAdmin: true,
+        });
+        if (!postResult.ok) {
+          summary.actions.push(`post_error:${postResult.error}`);
+          if (postResult.error !== "no_channel") {
+            return summary;
+          }
+        } else {
+          summary.actions.push(`posted:${scheduled.id}`);
+        }
       }
     }
     state = await loadQueue();
@@ -313,6 +354,11 @@ export async function postScheduledNow(id, bot, opts = {}) {
       postedAt: new Date().toISOString(),
       postedMessageId: msg.message_id,
     });
+    try {
+      await markChannelPosted("admin", item.id);
+    } catch (err) {
+      console.warn("channel pulse update failed", err.message);
+    }
     try {
       await incrementDayPost("admin", localDayString(config.timeZone));
     } catch (err) {

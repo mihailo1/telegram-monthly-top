@@ -5,21 +5,22 @@ Instructions for coding agents. Keep this file updated when architecture or prod
 ## Product goals
 
 1. **Monthly top** — on the **5th** (`/api/cron` 06:00 UTC ≈ 09:00 MSK) preview previous calendar month posts with photos, ranked by **sum of all reaction counts**, to admin DM; publish poll + album only after ✅.
-2. **Admin queue** — operator uploads media to bot DM; one item/day, random time 10:00–22:00 (`APP_TZ`).
-3. **Members queue** — media from **channel Direct Messages** (and non-admin media on the bot); priority over admin; up to **4/day** if no admin post that day. **Never post to the channel on ingest** — always schedule (cron/tick publishes later). If admin already posted that day → schedule next free day (tomorrow+).
-4. **Reply phrases** — after a member sends photo(s) (1 or album), always auto-reply **once** in channel DMs with a random line from `reply-phrases.json` (instead of “you are queued at HH:MM”).
+2. **Admin queue** — operator uploads media to bot DM; one item/day, random time 10:00–22:00 (`APP_TZ`). Defers if members posted (or are due) within the last hour.
+3. **Members queue** — media from **channel Direct Messages** (ignore `ADMIN_ID`). **Forward/repost** originals to the channel (copy-send fallback). **Immediate** if no channel post in the last hour; else schedule **+1h** (chain +1h between items). Album = one item. Next calendar day only if `now+1h` lands there.
+4. **Reply phrases** — immediate → random line from `reply-phrases.json`; deferred → `Уже был пост недавно, запостим в HH:MM`. One reply per author/topic per 60s (prefer caption/text). Optional future: SpaceXAI picks best quote by meaning (`XAI_API_KEY`).
 5. **Poll → avatar** — `scheduleAvatarJob` on monthly publish; after `AVATAR_POLL_DELAY_DAYS` (default 5), `stopPoll` + `setChatPhoto` with winning option’s photo.
 
 **Preview-first** for monthly top: never auto-publish monthly poll to the channel without ✅.
 
-## Day rules
+## Posting rules (1h pulse)
 
-| Condition | Allowed posts that day |
-|-----------|-------------------------|
-| Admin already posted | Members **blocked** (schedule next day+) |
-| No admin post | Members up to **4** |
-| Members active (queued/scheduled) | Admin queue **paused** |
-| Members empty | Admin schedules/posts as usual (1/day) |
+| Condition | Behavior |
+|-----------|----------|
+| No channel post in last hour | Members **forward immediately** |
+| Post in last hour (admin or members) | Members schedule **now+1h**; reply with ETA |
+| Several member items | Spaced **+1h** apart |
+| Members active / recent pulse | Admin queue **paused / deferred +1h** |
+| Admin private DM | Admin queue only (unchanged) |
 
 ## Architecture
 

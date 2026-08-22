@@ -636,27 +636,41 @@ export function createBot() {
   }
 
   async function enqueueMemberMedia(ctx, media) {
+    // Never treat ADMIN_ID messages in channel DMs as members UGC / phrase targets
+    if (isAdmin(ctx)) return;
+
     const {
       appendMemberPost,
     } = await import("./members/store.js");
     const {
       placeMemberItem,
       extractDirectMessagesTopicId,
+      replyAuthorText,
+      replyAuthorWithPhrase,
     } = await import("./members/process.js");
     const {
       recordMemberAlbumPart,
       scheduleMemberAlbumFinalize,
     } = await import("./members/albumIngest.js");
+    const { scheduleDebouncedReply } = await import(
+      "./members/phraseDebounce.js"
+    );
 
     const fromUserId = String(ctx.from?.id || "");
     const fromUsername = ctx.from?.username || "";
     const caption = ctx.message.caption || "";
     const groupId = ctx.message.media_group_id;
     const chatId = ctx.chat.id;
-    // Channel Direct Messages: each user conversation is a topic (required to reply)
     const dmTopicId = extractDirectMessagesTopicId(ctx.message);
     const threadId =
       ctx.message.message_thread_id ?? ctx.message.messageThreadId;
+
+    const replyOpts = {
+      replyChatId: chatId,
+      fromUserId,
+      directMessagesTopicId: dmTopicId,
+      messageThreadId: threadId,
+    };
 
     try {
       if (groupId) {
@@ -677,9 +691,10 @@ export function createBot() {
           }));
           const cap =
             parts.map((p) => p.caption).find((c) => c && c.trim()) || "";
-          const firstMsgId = parts
-            .map((p) => p.messageId)
-            .find((id) => id && id > 0);
+          const msgIds = parts
+            .map((p) => Number(p.messageId))
+            .filter((id) => id > 0)
+            .sort((a, b) => a - b);
           const topicFromParts = parts
             .map((p) => p.directMessagesTopicId)
             .find((id) => id != null);
@@ -692,14 +707,34 @@ export function createBot() {
             fromUserId: parts[0]?.fromUserId || fromUserId,
             fromUsername: parts[0]?.fromUsername || fromUsername,
             sourceKey: `bot_album_${chatId}_${groupId}`,
+            sourceChatId: chatId,
+            sourceMessageIds: msgIds,
+            directMessagesTopicId: topicFromParts ?? dmTopicId,
           });
-          // placeMemberItem: enqueue only (never channel) + film phrase to author
-          await placeMemberItem(item, bot, {
-            replyChatId: chatId,
-            replyToMessageId: firstMsgId || undefined,
+          const result = await placeMemberItem(item, bot, {
+            ...replyOpts,
+            replyToMessageId: msgIds[0],
             directMessagesTopicId: topicFromParts ?? dmTopicId,
             messageThreadId: threadFromParts ?? threadId,
+            skipAuthorReply: true,
           });
+          await scheduleDebouncedReply(
+            {
+              ...replyOpts,
+              replyToMessageId: msgIds[0],
+              caption: cap,
+              text: cap,
+              replyPayload: result.phrase,
+              mode: result.mode,
+            },
+            async (best) => {
+              if (best.mode === "scheduled") {
+                await replyAuthorText(bot, best.replyPayload, best);
+              } else {
+                await replyAuthorWithPhrase(bot, best);
+              }
+            },
+          );
         });
         return;
       }
@@ -710,30 +745,39 @@ export function createBot() {
         fromUserId,
         fromUsername,
         sourceKey: `bot_${chatId}_${ctx.message.message_id}`,
-      });
-      // Always: members queue + one film phrase in channel DMs (never channel post here)
-      await placeMemberItem(item, bot, {
-        replyChatId: chatId,
-        replyToMessageId: ctx.message.message_id,
+        sourceChatId: chatId,
+        sourceMessageIds: [ctx.message.message_id],
         directMessagesTopicId: dmTopicId,
-        messageThreadId: threadId,
       });
+      const result = await placeMemberItem(item, bot, {
+        ...replyOpts,
+        replyToMessageId: ctx.message.message_id,
+        skipAuthorReply: true,
+      });
+      await scheduleDebouncedReply(
+        {
+          ...replyOpts,
+          replyToMessageId: ctx.message.message_id,
+          caption,
+          text: caption,
+          replyPayload: result.phrase,
+          mode: result.mode,
+        },
+        async (best) => {
+          if (best.mode === "scheduled") {
+            await replyAuthorText(bot, best.replyPayload, best);
+          } else {
+            await replyAuthorWithPhrase(bot, best);
+          }
+        },
+      );
     } catch (err) {
       console.error("member enqueue failed", err);
-      // Don't spam channel-DM authors with errors; log for admin
-      try {
-        if (isAdmin(ctx) && ctx.chat?.type === "private") {
-          await ctx.reply(`⚠️ Members enqueue: ${err.message ?? err}`);
-        }
-      } catch {
-        /* ignore */
-      }
     }
   }
 
   async function enqueueFromMessage(ctx) {
     const media = extractQueueMedia(ctx.message);
-    // Pure text / stickers etc. — ignore silently (product rule)
     if (!media) return;
 
     // Admin managing their own queue: only in private chat with bot
@@ -742,18 +786,19 @@ export function createBot() {
       return;
     }
 
-    // Channel Direct Messages / monoforum / any non-admin media → members queue
+    // ADMIN_ID in channel DMs: ignore (no members queue, no phrase)
+    if (isAdmin(ctx)) return;
+
     await enqueueMemberMedia(ctx, media);
   }
 
   bot.on("message:photo", enqueueFromMessage);
   bot.on("message:video", enqueueFromMessage);
 
-  // Any other message in channel DM / monoforum (text etc.): random phrase only
+  // Text in channel DM / monoforum: debounced film phrase (ignore ADMIN_ID)
   bot.on("message:text", async (ctx) => {
-    // Admin private: ignore (commands/keyboard handled elsewhere)
     if (ctx.chat?.type === "private" && isAdmin(ctx)) return;
-    // Skip commands
+    if (isAdmin(ctx)) return;
     if (ctx.message.text?.startsWith("/")) return;
 
     try {
@@ -761,13 +806,21 @@ export function createBot() {
         replyAuthorWithPhrase,
         extractDirectMessagesTopicId,
       } = await import("./members/process.js");
-      await replyAuthorWithPhrase(bot, {
+      const { scheduleDebouncedReply } = await import(
+        "./members/phraseDebounce.js"
+      );
+      const replyOpts = {
         replyChatId: ctx.chat.id,
-        fromUserId: ctx.from?.id,
+        fromUserId: String(ctx.from?.id || ""),
         replyToMessageId: ctx.message.message_id,
         directMessagesTopicId: extractDirectMessagesTopicId(ctx.message),
         messageThreadId:
           ctx.message.message_thread_id ?? ctx.message.messageThreadId,
+        text: ctx.message.text || "",
+        caption: "",
+      };
+      await scheduleDebouncedReply(replyOpts, async (best) => {
+        await replyAuthorWithPhrase(bot, best);
       });
     } catch (err) {
       console.warn("phrase reply failed", err.message);

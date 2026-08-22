@@ -2,33 +2,26 @@
  * Members queue scheduling & posting.
  *
  * Rules (from product):
- * - Priority over admin queue
- * - If admin already posted that day → no members that day (next free day)
- * - Else up to 4 members posts/day
- * - NEVER post to channel on ingest — always enqueue + schedule 10–22 APP_TZ
- * - Always reply author in channel DMs with a film phrase (not queue ETA)
+ * - Prefer immediate forward (repost) to the channel
+ * - If any channel post in the last hour → schedule now+1h (chain +1h between items)
+ * - Album = one queue item / one forward
+ * - Author: film phrase on immediate; ETA text when deferred
+ * - Priority over admin queue (admin defers on recent members pulse)
  */
-import { Bot, InputFile } from "grammy";
+import { Bot } from "grammy";
 import { assertAdminId, assertBotToken, config } from "../config.js";
+import { incrementDayPost } from "../scheduler/dayState.js";
 import {
-  adminPostedOnDay,
-  incrementDayPost,
-  membersSlotsLeftOnDay,
-} from "../scheduler/dayState.js";
-import {
-  addDays,
-  formatLocal,
-  localDayString,
-  localDateTime,
-  randomPostAt,
-  wallClock,
-} from "../queue/time.js";
+  loadChannelPulse,
+  markChannelPosted,
+  nextAllowedAt,
+  PULSE_GAP_MS,
+} from "../scheduler/channelPulse.js";
+import { formatLocal, localDayString } from "../queue/time.js";
 import {
   countMembersActive,
   getMemberItem,
   getMembersScheduled,
-  listMembersActive,
-  listMembersQueued,
   loadMembersQueue,
   updateMemberItem,
 } from "./store.js";
@@ -56,7 +49,41 @@ export function memberItemToInputMedia(item, withCaption = true) {
   });
 }
 
+/**
+ * Prefer true forward (repost) from channel DMs; fall back to copy-send.
+ * @param {import('grammy').Api} api
+ * @param {string|number} chatId  destination channel
+ * @param {import('./store.js').MemberItem} item
+ */
 export async function publishMemberItem(api, chatId, item) {
+  const sourceChatId = item.sourceChatId;
+  const sourceIds = (item.sourceMessageIds || [])
+    .map(Number)
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b);
+
+  if (sourceChatId && sourceIds.length) {
+    try {
+      // grammY: forwardMessages(chat_id, from_chat_id, message_ids)
+      if (sourceIds.length > 1 && typeof api.forwardMessages === "function") {
+        const ids = await api.forwardMessages(
+          chatId,
+          sourceChatId,
+          sourceIds,
+        );
+        const mid = Array.isArray(ids) ? ids[0]?.message_id : undefined;
+        return { message_id: mid ?? sourceIds[0] };
+      }
+      return await api.forwardMessage(chatId, sourceChatId, sourceIds[0]);
+    } catch (err) {
+      console.warn(
+        "forward to channel failed, falling back to copy-send",
+        err?.message || err,
+      );
+    }
+  }
+
+  // Fallback: re-send by file_id (GramJS ingest / forward unavailable)
   const caption = item.caption || undefined;
   if (!item.media?.length) {
     throw new Error("member item has no media");
@@ -68,11 +95,39 @@ export async function publishMemberItem(api, chatId, item) {
     }
     return api.sendPhoto(chatId, m.fileId, { caption });
   }
-
-  // 2–10 mixed photo/video album (Telegram media group)
   const media = memberItemToInputMedia(item, true);
   const msgs = await api.sendMediaGroup(chatId, media);
   return msgs[0];
+}
+
+/**
+ * Next free post time: max(now, lastChannelPost+1h, latest scheduled members+1h).
+ * @returns {Promise<Date>}
+ */
+export async function computeMembersPostAt(nowMs = Date.now()) {
+  const pulse = await loadChannelPulse();
+  let at = nextAllowedAt(pulse, nowMs).getTime();
+
+  const { items } = await loadMembersQueue();
+  for (const x of items) {
+    if (x.status !== "scheduled" || !x.postAt) continue;
+    const t = new Date(x.postAt).getTime();
+    if (Number.isFinite(t)) {
+      at = Math.max(at, t + PULSE_GAP_MS);
+    }
+  }
+  return new Date(at);
+}
+
+/** HH:MM in APP_TZ */
+export function formatEtaClock(when, timeZone = config.timeZone) {
+  const d = typeof when === "string" ? new Date(when) : when;
+  return d.toLocaleString("ru-RU", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 /**
@@ -186,22 +241,77 @@ export async function replyAuthorWithPhrase(bot, opts = {}) {
 }
 
 /**
- * Next free members day (no admin that day, < 4 members already).
- * @param {string} fromDay
- * @param {string} tz
+ * Send arbitrary text to author in channel DM / monoforum (topic-aware).
+ * @param {import('grammy').Bot} bot
+ * @param {string} text
+ * @param {{
+ *   replyChatId?: string|number,
+ *   fromUserId?: string|number,
+ *   replyToMessageId?: number,
+ *   directMessagesTopicId?: number,
+ *   messageThreadId?: number,
+ * }} opts
  */
-async function findNextMembersDay(fromDay, tz) {
-  let day = fromDay;
-  for (let i = 0; i < 60; i++) {
-    const slots = await membersSlotsLeftOnDay(day, tz);
-    if (slots > 0) return day;
-    day = addDays(day, 1);
+export async function replyAuthorText(bot, text, opts = {}) {
+  const {
+    replyChatId,
+    fromUserId,
+    replyToMessageId,
+    directMessagesTopicId,
+    messageThreadId,
+  } = opts;
+  /** @type {Record<string, unknown>} */
+  const extra = {};
+  if (replyToMessageId != null) {
+    extra.reply_parameters = { message_id: replyToMessageId };
   }
-  return day;
+  if (directMessagesTopicId != null) {
+    extra.direct_messages_topic_id = directMessagesTopicId;
+  }
+  if (messageThreadId != null) {
+    extra.message_thread_id = messageThreadId;
+  } else if (directMessagesTopicId != null) {
+    extra.message_thread_id = directMessagesTopicId;
+  }
+
+  if (replyChatId) {
+    try {
+      await bot.api.raw.sendMessage({
+        chat_id: replyChatId,
+        text,
+        ...extra,
+      });
+      return { ok: true, text };
+    } catch (err) {
+      console.warn("replyAuthorText chat failed", err?.message || err);
+      if (extra.reply_parameters) {
+        try {
+          const { reply_parameters: _rp, ...rest } = extra;
+          await bot.api.raw.sendMessage({
+            chat_id: replyChatId,
+            text,
+            ...rest,
+          });
+          return { ok: true, text };
+        } catch (err2) {
+          console.warn("replyAuthorText retry failed", err2?.message || err2);
+        }
+      }
+    }
+  }
+  if (fromUserId) {
+    try {
+      await bot.api.sendMessage(fromUserId, text);
+      return { ok: true, text };
+    } catch (err) {
+      return { ok: false, text, error: err?.message || String(err) };
+    }
+  }
+  return { ok: false, text, error: "no reply target" };
 }
 
 /**
- * After ingest: ALWAYS schedule (never post to channel here) + phrase-reply to author.
+ * Place member item: immediate forward if pulse allows, else schedule +1h chain.
  * @param {import('./store.js').MemberItem} item
  * @param {import('grammy').Bot} bot
  * @param {{
@@ -209,6 +319,7 @@ async function findNextMembersDay(fromDay, tz) {
  *   replyToMessageId?: number,
  *   directMessagesTopicId?: number,
  *   messageThreadId?: number,
+ *   skipAuthorReply?: boolean,
  * }} [opts]
  */
 export async function placeMemberItem(item, bot, opts = {}) {
@@ -220,64 +331,84 @@ export async function placeMemberItem(item, bot, opts = {}) {
   const directMessagesTopicId = opts.directMessagesTopicId;
   const messageThreadId = opts.messageThreadId;
 
+  const now = Date.now();
+  const postAt = await computeMembersPostAt(now);
+  const immediate = postAt.getTime() <= now + 2000; // 2s slack
   const today = localDayString(tz);
-  const { hour } = wallClock(tz);
 
-  // Never publish to channel on ingest — only members queue + cron/tick posts later.
-  // Admin already used today → start looking from tomorrow.
-  let day = today;
-  const adminToday = await adminPostedOnDay(today, tz);
-  const slotsToday = await membersSlotsLeftOnDay(today, tz);
-  if (adminToday || slotsToday <= 0 || hour >= 22) {
-    day = addDays(today, 1);
-  }
-  day = await findNextMembersDay(day, tz);
-
-  /** @type {Date} */
-  let postAt;
-  if (day === today && hour < 22) {
-    // later today, still inside 10–22 window
-    if (hour < 10) {
-      postAt = randomPostAt(day, tz);
-    } else {
-      const start = new Date(Date.now() + 5 * 60 * 1000);
-      const end = localDateTime(day, 22, 0, tz);
-      if (start >= end) {
-        day = await findNextMembersDay(addDays(today, 1), tz);
-        postAt = randomPostAt(day, tz);
-      } else {
-        const t =
-          start.getTime() +
-          Math.random() * (end.getTime() - start.getTime());
-        postAt = new Date(t);
+  if (immediate) {
+    try {
+      const msg = await publishMemberItem(bot.api, channelId, item);
+      await updateMemberItem(item.id, {
+        status: "posted",
+        postedAt: new Date().toISOString(),
+        postedMessageId: msg?.message_id,
+        postDay: today,
+        postAt: null,
+      });
+      await markChannelPosted("members", item.id);
+      try {
+        await incrementDayPost("members", today);
+      } catch {
+        /* ignore */
       }
+
+      let authorNotified = false;
+      let phrase = "";
+      if (!opts.skipAuthorReply) {
+        const notified = await replyAuthorWithPhrase(bot, {
+          replyChatId,
+          fromUserId: item.fromUserId,
+          replyToMessageId,
+          directMessagesTopicId,
+          messageThreadId,
+        });
+        authorNotified = notified.ok;
+        phrase = notified.phrase;
+        await updateMemberItem(item.id, { authorNotified });
+      }
+
+      try {
+        await bot.api.sendMessage(
+          assertAdminId(),
+          `👥 Members: forwarded to channel\nid: <code>${item.id}</code>`,
+          { parse_mode: "HTML" },
+        );
+      } catch {
+        /* ignore */
+      }
+
+      return {
+        mode: "immediate",
+        postAt: null,
+        messageId: msg?.message_id ?? null,
+        postDay: today,
+        phrase,
+        authorNotified,
+      };
+    } catch (err) {
+      console.error("members immediate forward failed, scheduling", err);
+      // fall through to schedule
     }
-  } else {
-    postAt = randomPostAt(day, tz);
   }
 
+  const when = immediate ? new Date(now + PULSE_GAP_MS) : postAt;
+  const day = localDayString(tz, when);
   await updateMemberItem(item.id, {
     status: "scheduled",
     postDay: day,
-    postAt: postAt.toISOString(),
+    postAt: when.toISOString(),
   });
 
+  const eta = formatEtaClock(when, tz);
+  const etaText = `Уже был пост недавно, запостим в ${eta}`;
+
   try {
-    const adminId = assertAdminId();
-    const why = adminToday
-      ? "admin already posted today → members deferred"
-      : slotsToday <= 0
-        ? "no members slots today"
-        : hour >= 22
-          ? "after 22:00 window"
-          : "queued";
     await bot.api.sendMessage(
-      adminId,
-      `👥 Members queue +1\n` +
+      assertAdminId(),
+      `👥 Members queue +1 (wait)\n` +
         (item.fromUsername ? `@${item.fromUsername}\n` : "") +
-        `${why}\n` +
-        `when: ${formatLocal(postAt, tz)}\n` +
-        `day: ${day}\n` +
+        `when: ${formatLocal(when, tz)}\n` +
         `id: <code>${item.id}</code>`,
       { parse_mode: "HTML" },
     );
@@ -285,38 +416,31 @@ export async function placeMemberItem(item, bot, opts = {}) {
     /* ignore */
   }
 
-  // Always auto-reply author with a film phrase in channel DMs / monoforum
-  const notified = await replyAuthorWithPhrase(bot, {
-    replyChatId,
-    fromUserId: item.fromUserId,
-    replyToMessageId,
-    directMessagesTopicId,
-    messageThreadId,
-  });
-  if (!notified.ok) {
-    console.warn(
-      "author phrase not delivered",
-      item.id,
-      notified.error || "",
-      "topic=",
+  let authorNotified = false;
+  if (!opts.skipAuthorReply) {
+    const notified = await replyAuthorText(bot, etaText, {
+      replyChatId,
+      fromUserId: item.fromUserId,
+      replyToMessageId,
       directMessagesTopicId,
-    );
+      messageThreadId,
+    });
+    authorNotified = notified.ok;
+    await updateMemberItem(item.id, { authorNotified });
   }
-  await updateMemberItem(item.id, { authorNotified: notified.ok });
 
   return {
     mode: "scheduled",
-    postAt,
+    postAt: when,
     messageId: null,
     postDay: day,
-    phrase: notified.phrase,
-    authorNotified: notified.ok,
-    deferredForAdmin: adminToday,
+    phrase: etaText,
+    authorNotified,
   };
 }
 
 /**
- * Tick: post due members items (up to remaining slots), schedule nothing extra.
+ * Tick: post due members items (1h pulse; no day-slot gates).
  * @param {object} [opts]
  * @param {import('grammy').Bot} [opts.bot]
  */
@@ -344,38 +468,33 @@ export async function processMembersTick(opts = {}) {
     .sort((a, b) => (a.postAt < b.postAt ? -1 : 1));
 
   for (const item of due) {
-    const day = item.postDay || localDayString(tz);
-    // safety: don't post members on admin day (day-state + admin queue)
-    if (await adminPostedOnDay(day, tz)) {
-      const nextDay = await findNextMembersDay(addDays(day, 1), tz);
-      const postAt = randomPostAt(nextDay, tz);
+    // Respect 1h pulse vs whatever just posted
+    const pulse = await loadChannelPulse();
+    const allowed = nextAllowedAt(pulse).getTime();
+    if (allowed > Date.now() + 2000) {
       await updateMemberItem(item.id, {
-        postDay: nextDay,
-        postAt: postAt.toISOString(),
+        postAt: new Date(allowed).toISOString(),
+        postDay: localDayString(tz, new Date(allowed)),
       });
-      summary.actions.push(`defer_admin_day:${item.id}->${nextDay}`);
-      continue;
-    }
-    const slotsLeft = await membersSlotsLeftOnDay(day, tz);
-    if (slotsLeft <= 0) {
-      const nextDay = await findNextMembersDay(addDays(day, 1), tz);
-      const postAt = randomPostAt(nextDay, tz);
-      await updateMemberItem(item.id, {
-        postDay: nextDay,
-        postAt: postAt.toISOString(),
-      });
-      summary.actions.push(`defer_full:${item.id}->${nextDay}`);
+      summary.actions.push(`defer_pulse:${item.id}`);
       continue;
     }
 
     try {
       const msg = await publishMemberItem(bot.api, channelId, item);
+      const day = localDayString(tz);
       await updateMemberItem(item.id, {
         status: "posted",
         postedAt: new Date().toISOString(),
-        postedMessageId: msg.message_id,
+        postedMessageId: msg?.message_id,
+        postDay: day,
       });
-      await incrementDayPost("members", day);
+      await markChannelPosted("members", item.id);
+      try {
+        await incrementDayPost("members", day);
+      } catch {
+        /* ignore */
+      }
       summary.posted += 1;
       summary.actions.push(`posted:${item.id}`);
     } catch (err) {
@@ -413,17 +532,22 @@ export async function postMemberNow(id, bot) {
 
   const tz = config.timeZone;
   const today = localDayString(tz);
-  // force post even if limits — admin "Post now" from members browser
+  // force post — admin "Post now" from members browser
   try {
     const msg = await publishMemberItem(bot.api, channelId, item);
     await updateMemberItem(id, {
       status: "posted",
       postedAt: new Date().toISOString(),
-      postedMessageId: msg.message_id,
+      postedMessageId: msg?.message_id,
       postDay: today,
     });
-    await incrementDayPost("members", today);
-    return { ok: true, messageId: msg.message_id };
+    await markChannelPosted("members", id);
+    try {
+      await incrementDayPost("members", today);
+    } catch {
+      /* ignore */
+    }
+    return { ok: true, messageId: msg?.message_id };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -451,8 +575,8 @@ export async function membersQueueStatusText() {
   }
   lines.push(
     "",
-    "Source: channel Direct Messages.",
-    "Priority over admin queue · up to 4/day · no admin post that day.",
+    "Source: channel Direct Messages (forward/repost).",
+    "Immediate if free · else +1h spacing · priority over admin.",
   );
   return lines.filter(Boolean).join("\n");
 }

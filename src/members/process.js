@@ -162,12 +162,15 @@ export function extractDirectMessagesTopicId(msg) {
  *   replyToMessageId?: number,
  *   directMessagesTopicId?: number,
  *   messageThreadId?: number,
+ *   text?: string,
+ *   caption?: string,
  * }} opts
  * @returns {Promise<{ ok: boolean, phrase: string, error?: string }>}
  */
 export async function replyAuthorWithPhrase(bot, opts = {}) {
-  const { randomReplyPhrase } = await import("../replyPhrases.js");
-  const phrase = randomReplyPhrase();
+  const { pickReplyPhrase } = await import("../phraseEmbed.js");
+  const userText = (opts.text || opts.caption || "").trim();
+  const phrase = await pickReplyPhrase(userText);
   const {
     replyChatId,
     fromUserId,

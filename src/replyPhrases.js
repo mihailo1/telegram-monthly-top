@@ -1,5 +1,6 @@
 /**
- * Random reply lines from the film dub transcript (filtered full phrases).
+ * Reply lines from the film dub transcript (filtered full phrases).
+ * Semantic pick (local Xenova embeddings) lives in phraseEmbed.js.
  */
 import fs from "node:fs";
 import path from "node:path";

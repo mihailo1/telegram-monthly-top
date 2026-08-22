@@ -16,8 +16,7 @@
       "maxDuration": 60
     },
     "api/webhook.js": {
-      "maxDuration": 60,
-      "memory": 1024
+      "maxDuration": 60
     },
     "api/setup-webhook.js": {
       "maxDuration": 10

@@ -25,3 +25,5 @@ data/user.session
 *.log
 tmp/
 dist/
+
+.transformers-cache/

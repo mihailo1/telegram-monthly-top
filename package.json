@@ -15,6 +15,7 @@
     "set-webhook": "node scripts/set-webhook.mjs",
     "env-check": "node scripts/print-env-for-vercel.mjs",
     "phrases:embed": "node scripts/precompute-phrase-embeddings.mjs",
+    "phrases:train": "node scripts/train-phrase-projector.mjs",
     "vercel-dev": "vercel dev"
   },
   "keywords": [
@@ -29,9 +30,11 @@
   "dependencies": {
     "@vercel/blob": "^1.1.1",
     "@vercel/functions": "^3.9.2",
-    "@xenova/transformers": "^2.17.2",
     "dotenv": "^16.4.7",
     "grammy": "^1.35.0",
     "telegram": "^2.26.22"
+  },
+  "optionalDependencies": {
+    "@xenova/transformers": "^2.17.2"
   }
 }

@@ -1,0 +1,12 @@
+{
+  "teacherModel": "Xenova/multilingual-e5-small",
+  "hashDim": 4096,
+  "outDim": 384,
+  "layout": "bin-bias-then-W-f32",
+  "bin": "phrase-query-projector.bin",
+  "trainedAt": "2026-08-22T21:36:55.798Z",
+  "selfCos": 0.9903572075110689,
+  "epochs": 30,
+  "augments": 20,
+  "samples": 3980
+}

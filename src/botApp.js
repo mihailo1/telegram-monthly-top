@@ -151,7 +151,15 @@ export function createBot() {
 
   function isAdmin(ctx) {
     if (!config.adminId) return true;
-    return String(ctx.from?.id) === String(config.adminId);
+    if (String(ctx.from?.id) === String(config.adminId)) return true;
+    // Replying inside channel Direct Messages "as the channel" carries no
+    // personal from.id match — sender_chat is the channel itself instead.
+    // Only the channel owner/admin can send as the channel, so treat it as us.
+    const senderChatId = ctx.senderChat?.id ?? ctx.msg?.sender_chat?.id;
+    if (senderChatId != null && String(senderChatId) === String(config.groupChatId)) {
+      return true;
+    }
+    return false;
   }
 
   function requireAdminPrivate(ctx) {
@@ -400,6 +408,25 @@ export function createBot() {
   bot.command("menu", sendWelcome);
   bot.command("help", sendHelp);
   bot.command("preview", runPreviewFromChat);
+
+  // Reply to a stray bot message (e.g. a phrase reply) with /rm to delete it —
+  // works in channel Direct Messages too, where the native client can't.
+  bot.command("rm", async (ctx) => {
+    if (!isAdmin(ctx)) return;
+    const target = ctx.message.reply_to_message;
+    if (!target) {
+      await ctx.reply("Reply to the message you want deleted with /rm");
+      return;
+    }
+    try {
+      await ctx.api.deleteMessage(ctx.chat.id, target.message_id);
+      await ctx.deleteMessage().catch(() => {});
+    } catch (err) {
+      await ctx.reply(`Delete failed: ${escapeHtml(err.message || String(err))}`, {
+        parse_mode: "HTML",
+      });
+    }
+  });
 
   bot.command("queue", async (ctx) => {
     const deny = requireAdminPrivate(ctx);

@@ -8,7 +8,7 @@ Instructions for coding agents. Keep this file updated when architecture or prod
 2. **Admin queue** — operator uploads media to bot DM; one item/day, random time 10:00–22:00 (`APP_TZ`). Defers if members posted (or are due) within the last hour.
 3. **Members queue** — media from **channel Direct Messages** (ignore `ADMIN_ID`). **Forward/repost** originals to the channel (copy-send fallback). **Immediate** if no channel post in the last hour; else schedule **+1h** (chain +1h between items). Album = one item. Next calendar day only if `now+1h` lands there.
 4. **Reply phrases** — immediate → local pick from `reply-phrases.json` (**no neural net on Vercel**): default `distill` (hashed n-grams → tiny projector ≈ e5, cosine vs precomputed phrase vectors) or `bm25`; `PHRASE_PICKER=random|bm25|distill`. Train offline: `npm run phrases:embed` then `npm run phrases:train`. Deferred → `Уже был пост недавно, запостим в HH:MM`. One reply per author/topic per 60s (prefer caption/text).
-5. **Poll → avatar** — `scheduleAvatarJob` on monthly publish; after `AVATAR_POLL_DELAY_DAYS` (default 5), `stopPoll` + `setChatPhoto` with winning option’s photo.
+5. **Poll → avatar** — `scheduleAvatarJob` on monthly publish; after `AVATAR_POLL_DELAY_DAYS` (default 5), `avatar-cron` (twice daily) reads cached vote counts from `poll` webhook updates (`monthly/pollState.js`) and calls `setChatPhoto` with the leading option's photo. Poll is never stopped — it stays open for the channel.
 
 **Preview-first** for monthly top: never auto-publish monthly poll to the channel without ✅.
 
@@ -32,7 +32,10 @@ queue-cron ──► processMembersTick ──► channel posts          │
            ──► processQueueTick ────► channel posts ◄────────┘
            ──► pollChannelDirectMessages (GramJS)
 
-Monthly: collect (GramJS) → rank → DM preview → ✅ → publishAlbumAndPoll
+avatar-cron (2x/day) ──► processAvatarJobs ──► setChatPhoto (poll stays open)
+
+Monthly: collect (GramJS) → rank → DM preview → ✅ → publishAlbumAndPoll → scheduleAvatarJob
+bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs at +5d
 ```
 
 | Client | Role |
@@ -50,9 +53,11 @@ Monthly: collect (GramJS) → rank → DM preview → ✅ → publishAlbumAndPol
 | `src/scheduler/dayState.js` | Per-day admin/members counters |
 | `src/format.js` | Monthly poll title/options (channel historical locale) |
 | `src/monthly/avatarJob.js` | Delayed poll winner → channel avatar |
+| `src/monthly/pollState.js` | Live vote-count cache from `poll` webhook updates |
 | `src/data/reply-phrases.json` | Quote corpus for author replies |
 | `api/webhook.js` | Telegram updates (`bot.init` required) |
-| `api/queue-cron.js` | Poll + members tick + admin tick |
+| `api/queue-cron.js` | Members tick + admin tick (15m) |
+| `api/avatar-cron.js` | Poll → avatar resolution (2x/day) |
 | `api/cron.js` / `api/preview.js` | Monthly preview |
 
 ## Shared post shapes

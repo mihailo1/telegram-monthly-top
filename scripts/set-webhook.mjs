@@ -24,7 +24,7 @@ if (webhookSecret) url += `?secret=${encodeURIComponent(webhookSecret)}`;
 const bot = new Bot(token);
 await bot.api.setWebhook(url, {
   drop_pending_updates: true,
-  allowed_updates: ["message", "callback_query"],
+  allowed_updates: ["message", "callback_query", "poll"],
 });
 const info = await bot.api.getWebhookInfo();
 console.log("Webhook set:", url);

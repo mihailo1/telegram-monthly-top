@@ -6,7 +6,7 @@ Automation for the public Telegram channel [@krasiviyded](https://t.me/krasiviyd
 2. **Admin daily queue** — you drop media in the bot DM; one post/day at a random time (10:00–22:00 MSK)
 3. **Members queue** — channel DMs (not admin): **forward/repost** to channel immediately, or **+1h** if something posted in the last hour (albums = one post; items chain +1h). Admin defers on recent members activity
 4. **Film-phrase replies** — immediate accept → random quote; deferred → ETA time; one reply per minute (text preferred)
-5. **Poll → avatar** — on the **5th** monthly preview hits admin for ✅/❌; 5 days after publish, cron stops the poll and sets the winning photo as the channel avatar
+5. **Poll → avatar** — on the **5th** monthly preview hits admin for ✅/❌; 5 days after publish, a twice-daily cron reads live vote counts (poll stays open — never stopped) and sets the leading photo as the channel avatar
 
 Deployed on **Vercel** (webhook + cron). Local long-polling is optional for development.
 
@@ -26,7 +26,7 @@ Deployed on **Vercel** (webhook + cron). Local long-polling is optional for deve
 - [grammY](https://grammy.dev) — Bot API (webhook / publish)
 - [GramJS `telegram`](https://github.com/gram-js/gramjs) — user session (history, monoforum poll)
 - [@vercel/blob](https://vercel.com/docs/storage/vercel-blob) — queue state / pending / phrases staging
-- Vercel serverless: `api/webhook`, `api/cron`, `api/queue-cron`, `api/preview`
+- Vercel serverless: `api/webhook`, `api/cron`, `api/queue-cron`, `api/avatar-cron`, `api/preview`
 
 ## Project layout
 
@@ -62,8 +62,9 @@ See **[DEPLOY.md](./DEPLOY.md)**.
 ```bash
 npx vercel --prod
 PUBLIC_URL=https://your-app.vercel.app npm run set-webhook
-# Hobby: hit queue tick every 15m via external cron / GitHub Actions
+# Hobby: hit queue tick every 15m, avatar tick 2x/day, via external cron / GitHub Actions
 curl "https://your-app.vercel.app/api/queue-cron?secret=$CRON_SECRET"
+curl "https://your-app.vercel.app/api/avatar-cron?secret=$CRON_SECRET"
 ```
 
 ## Bot UI (admin DM)

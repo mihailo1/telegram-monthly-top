@@ -1,0 +1,36 @@
+# Monthly poll → avatar only needs checking twice a day (5-day delay, not
+# minute-level). Separate from queue-tick.yml's 15-minute admin/members tick.
+#
+# Required GitHub repo secrets (reuses queue-tick's if already set):
+#   AVATAR_CRON_URL = https://telegram-monthly-top.vercel.app/api/avatar-cron?secret=CRON_SECRET
+#   (or APP_URL + CRON_SECRET separately — see env below)
+
+name: avatar-tick
+
+on:
+  schedule:
+    - cron: "0 6,18 * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call avatar-cron
+        env:
+          AVATAR_CRON_URL: ${{ secrets.AVATAR_CRON_URL }}
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -e
+          if [ -n "$AVATAR_CRON_URL" ]; then
+            URL="$AVATAR_CRON_URL"
+          elif [ -n "$APP_URL" ] && [ -n "$CRON_SECRET" ]; then
+            URL="${APP_URL%/}/api/avatar-cron?secret=${CRON_SECRET}"
+          else
+            echo "Missing secrets: set AVATAR_CRON_URL or APP_URL+CRON_SECRET"
+            exit 1
+          fi
+          echo "GET $URL"
+          curl -fsS --max-time 55 "$URL" | tee /tmp/out.json
+          grep -q '"ok":true' /tmp/out.json

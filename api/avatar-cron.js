@@ -1,13 +1,13 @@
 /**
- * Frequent tick: members monoforum poll + members post + admin queue.
- * Monthly poll → avatar runs on its own, less frequent cron — see api/avatar-cron.js.
+ * Twice-daily tick: resolve due monthly-poll → avatar jobs.
+ * Split out from queue-cron (which ticks every 15m) since a 5-day delay
+ * doesn't need 15-minute resolution — see .github/workflows/avatar-tick.yml.
+ *
  * Auth: x-vercel-cron OR ?secret=CRON_SECRET
  */
 import { Bot } from "grammy";
 import { assertBotToken, config as appConfig } from "../src/config.js";
-import { pollChannelDirectMessages } from "../src/members/pollMonoforum.js";
-import { processMembersTick } from "../src/members/process.js";
-import { processQueueTick } from "../src/queue/process.js";
+import { processAvatarJobs } from "../src/monthly/avatarJob.js";
 
 export const config = {
   maxDuration: 60,
@@ -37,24 +37,10 @@ export default async function handler(req, res) {
   try {
     const bot = new Bot(assertBotToken());
     await bot.init();
-
-    // 1) Pull new channel DMs into members queue
-    let poll = { scanned: 0, ingested: 0, actions: ["skipped"] };
-    try {
-      poll = await pollChannelDirectMessages();
-    } catch (err) {
-      poll = { scanned: 0, ingested: 0, actions: [`poll_throw:${err.message}`] };
-    }
-
-    // 2) Post due members (priority)
-    const members = await processMembersTick({ bot });
-
-    // 3) Admin queue (paused while members active)
-    const admin = await processQueueTick({ bot });
-
-    res.status(200).json({ ok: true, poll, members, admin });
+    const avatar = await processAvatarJobs({ bot });
+    res.status(200).json({ ok: true, avatar });
   } catch (err) {
-    console.error("queue-cron failed", err);
+    console.error("avatar-cron failed", err);
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 }

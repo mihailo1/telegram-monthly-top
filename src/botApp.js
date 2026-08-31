@@ -795,6 +795,16 @@ export function createBot() {
   bot.on("message:photo", enqueueFromMessage);
   bot.on("message:video", enqueueFromMessage);
 
+  // Live vote counts for polls we keep open (see monthly/avatarJob.js)
+  bot.on("poll", async (ctx) => {
+    try {
+      const { savePollState } = await import("./monthly/pollState.js");
+      await savePollState(ctx.poll);
+    } catch (err) {
+      console.error("savePollState failed", err.message);
+    }
+  });
+
   // Text in channel DM / monoforum: debounced film phrase (ignore ADMIN_ID)
   bot.on("message:text", async (ctx) => {
     if (ctx.chat?.type === "private" && isAdmin(ctx)) return;
@@ -1174,6 +1184,7 @@ export function createBot() {
         const job = await scheduleAvatarJob({
           chatId,
           pollMessageId: pollId,
+          pollId: pollMessage.poll?.id,
           photoFileIds: pending.photos.map((p) => p.fileId),
           channelUsername: pending.channelUsername,
           rangeLabel: pending.rangeLabel,

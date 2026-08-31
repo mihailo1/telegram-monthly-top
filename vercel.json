@@ -15,6 +15,9 @@
     "api/queue-cron.js": {
       "maxDuration": 60
     },
+    "api/avatar-cron.js": {
+      "maxDuration": 60
+    },
     "api/webhook.js": {
       "maxDuration": 60
     },
@@ -30,6 +33,10 @@
     {
       "path": "/api/queue-cron",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/avatar-cron",
+      "schedule": "0 8 * * *"
     }
   ]
 }

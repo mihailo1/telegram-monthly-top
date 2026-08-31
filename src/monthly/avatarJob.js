@@ -1,6 +1,10 @@
 /**
- * After a monthly poll is live for N days, stop the poll, pick the winning
- * option, and set that photo as the channel profile picture.
+ * After a monthly poll is live for N days, read the current vote counts
+ * (without stopping the poll — it stays open for the channel) and set the
+ * winning photo as the channel profile picture.
+ *
+ * Vote counts come from `poll` webhook updates cached in pollState.js —
+ * Telegram has no "peek at a live poll's results" API call.
  *
  * Requires bot admin right: can_change_info (Change channel info).
  */
@@ -8,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Bot, InputFile } from "grammy";
 import { assertAdminId, assertBotToken, config } from "../config.js";
+import { getPollState } from "./pollState.js";
 
 const BLOB_PREFIX = "monthly/avatar-jobs/";
 const LOCAL_DIR = path.resolve("./data/monthly/avatar-jobs");
@@ -30,6 +35,7 @@ function useRemote() {
  * @property {string} chatId         channel id
  * @property {string} channelUsername
  * @property {number} pollMessageId
+ * @property {string} [pollId]       Telegram poll.id — key for cached vote state
  * @property {string[]} photoFileIds  index matches poll option 0..n-1
  * @property {string} [rangeLabel]
  * @property {string} [pollQuestion]
@@ -101,6 +107,7 @@ async function listJobs() {
  * @param {object} input
  * @param {string|number} input.chatId
  * @param {number} input.pollMessageId
+ * @param {string} [input.pollId]
  * @param {string[]} input.photoFileIds
  * @param {string} [input.channelUsername]
  * @param {string} [input.rangeLabel]
@@ -129,6 +136,7 @@ export async function scheduleAvatarJob(input) {
     chatId: String(input.chatId),
     channelUsername: input.channelUsername || config.channelUsername,
     pollMessageId: input.pollMessageId,
+    pollId: input.pollId || "",
     photoFileIds: input.photoFileIds,
     rangeLabel: input.rangeLabel || "",
     pollQuestion: input.pollQuestion || "",
@@ -200,14 +208,16 @@ export async function processAvatarJobs(opts = {}) {
  * @param {AvatarJob} job
  */
 async function resolveAvatarJob(bot, job) {
-  // Stop poll → final results (also closes voting)
-  const poll = await bot.api.stopPoll(job.chatId, job.pollMessageId);
-  const options = poll.options || [];
+  // Read cached vote counts from `poll` webhook updates — poll stays open,
+  // we never call stopPoll. No cached state means nobody has voted yet.
+  const state = job.pollId ? await getPollState(job.pollId) : null;
+  const options = state?.options || [];
+
   const winnerIndex = pickWinnerIndex(options);
 
   if (winnerIndex < 0 || winnerIndex >= job.photoFileIds.length) {
     job.status = "skipped";
-    job.error = "no_valid_winner";
+    job.error = job.pollId ? "no_valid_winner" : "no_poll_id_on_job";
     job.completedAt = new Date().toISOString();
     await writeJob(job);
     return;
@@ -225,7 +235,7 @@ async function resolveAvatarJob(bot, job) {
     await writeJob(job);
     await notifyAdmin(
       bot,
-      `⏭ Poll closed with 0 votes — channel avatar not changed.\n` +
+      `⏭ No votes yet — channel avatar not changed (poll stays open).\n` +
         `poll: <code>${job.pollMessageId}</code>`,
     );
     return;
@@ -262,7 +272,7 @@ async function resolveAvatarJob(bot, job) {
   await notifyAdmin(
     bot,
     [
-      `🏆 Monthly poll resolved — channel avatar updated`,
+      `🏆 Monthly poll leader — channel avatar updated (poll stays open)`,
       job.rangeLabel ? `period: ${job.rangeLabel}` : "",
       `winner: option <b>${label}</b> · ${votes} votes (index ${winnerIndex})`,
       link ? `<a href="${link}">poll</a>` : `poll msg: <code>${job.pollMessageId}</code>`,

@@ -62,15 +62,17 @@ Do **not** run local `npm run bot` at the same time as the production webhook.
 | Path | Schedule | Role |
 |------|----------|------|
 | `/api/cron` | `0 6 5 * *` | Monthly preview → admin DM for ✅/❌ (~09:00 MSK on the **5th**) |
-| `/api/queue-cron` | `0 7 * * *` | Daily tick: queues + **avatar jobs** (Hobby-friendly) |
+| `/api/queue-cron` | `0 7 * * *` | Daily fallback tick: admin + members queues (Hobby-friendly) |
+| `/api/avatar-cron` | `0 8 * * *` | Daily fallback tick: **avatar jobs** (Hobby-friendly) |
 
-After you ✅ publish a monthly poll, `scheduleAvatarJob` stores a job for **+5 days** (`AVATAR_POLL_DELAY_DAYS`, default 5). `queue-cron` (and the 15‑minute GitHub Actions tick) then runs `stopPoll` + `setChatPhoto` with the winning option.
+After you ✅ publish a monthly poll, `scheduleAvatarJob` stores a job for **+5 days** (`AVATAR_POLL_DELAY_DAYS`, default 5) and the poll's `poll.id`. Every vote pushes a `poll` webhook update, cached by `monthly/pollState.js`. Once a job is due, `avatar-cron` reads that cached state and calls `setChatPhoto` with the leading option's photo — **the poll itself is never stopped**, it stays open for the channel.
 
-**Hobby plan** only allows once-per-day platform crons. For random 10:00–22:00 posts and timely avatar resolution, call `/api/queue-cron` every **15 minutes** via:
+**Hobby plan** only allows once-per-day platform crons. For random 10:00–22:00 posts, use `/api/queue-cron` every **15 minutes**; for avatar resolution (5-day delay — no need for minute-level polling), `/api/avatar-cron` twice a day is enough:
 
 - [cron-job.org](https://cron-job.org), or
-- GitHub Actions workflow `.github/workflows/queue-tick.yml`  
-  Secret: `QUEUE_CRON_URL=https://…/api/queue-cron?secret=CRON_SECRET`
+- GitHub Actions workflows:
+  - `.github/workflows/queue-tick.yml` (every 15m) — secret `QUEUE_CRON_URL=https://…/api/queue-cron?secret=CRON_SECRET`
+  - `.github/workflows/avatar-tick.yml` (2x/day) — secret `AVATAR_CRON_URL=https://…/api/avatar-cron?secret=CRON_SECRET` (falls back to `APP_URL`+`CRON_SECRET` if unset)
 
 ## 6. Smoke tests
 
@@ -80,6 +82,9 @@ curl -sS https://your-app.vercel.app/api/webhook
 
 # Queue + members tick
 curl -sS "https://your-app.vercel.app/api/queue-cron?secret=$CRON_SECRET"
+
+# Avatar jobs tick
+curl -sS "https://your-app.vercel.app/api/avatar-cron?secret=$CRON_SECRET"
 
 # Monthly preview (admin DM)
 curl -sS -X POST "https://your-app.vercel.app/api/preview?secret=$CRON_SECRET"

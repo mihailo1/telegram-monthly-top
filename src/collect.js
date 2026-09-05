@@ -87,14 +87,23 @@ export async function downloadPostPhotos(client, posts) {
     if (!post.rawMessage) continue;
     try {
       const buf = await client.downloadMedia(post.rawMessage, {});
+      let bytes;
       if (buf && Buffer.isBuffer(buf)) {
-        post.photoBuffer = buf;
+        bytes = buf;
       } else if (buf instanceof Uint8Array) {
-        post.photoBuffer = Buffer.from(buf);
+        bytes = Buffer.from(buf);
       } else if (typeof buf === "string") {
         // path written to disk — read it
         const fs = await import("node:fs");
-        post.photoBuffer = fs.readFileSync(buf);
+        bytes = fs.readFileSync(buf);
+      }
+      // downloadMedia can resolve with a 0-byte buffer on a bad/expired
+      // media reference — an empty file_id passed to sendMediaGroup later
+      // makes Telegram reject the *entire* album, not just this photo.
+      if (bytes && bytes.length > 0) {
+        post.photoBuffer = bytes;
+      } else if (bytes) {
+        console.warn(`Empty photo download for msg ${post.id}, skipping`);
       }
     } catch (err) {
       console.warn(`Failed to download photo for msg ${post.id}:`, err.message);

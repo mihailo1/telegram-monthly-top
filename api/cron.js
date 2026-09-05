@@ -6,7 +6,8 @@
  * Auth: Authorization: Bearer CRON_SECRET  OR  ?secret=CRON_SECRET
  * Vercel Cron sends header x-vercel-cron: 1
  */
-import { config as appConfig } from "../src/config.js";
+import { Bot } from "grammy";
+import { assertAdminId, assertBotToken, config as appConfig } from "../src/config.js";
 import { runMonthlyPreview } from "../src/runPreview.js";
 
 export const config = {
@@ -42,6 +43,15 @@ export default async function handler(req, res) {
     res.status(200).json({ ok: true, ...result });
   } catch (err) {
     console.error("cron preview failed", err);
+    try {
+      const bot = new Bot(assertBotToken());
+      await bot.api.sendMessage(
+        assertAdminId(),
+        `⚠️ Monthly preview crashed — no draft/buttons were created.\n${String(err.message || err).slice(0, 500)}`,
+      );
+    } catch (notifyErr) {
+      console.error("failed to notify admin of cron failure", notifyErr);
+    }
     res.status(500).json({
       ok: false,
       error: String(err.message || err),

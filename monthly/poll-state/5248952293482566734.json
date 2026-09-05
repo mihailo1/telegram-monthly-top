@@ -1,0 +1,53 @@
+{
+  "id": "5248952293482566734",
+  "options": [
+    {
+      "persistent_id": "0",
+      "text": "1️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "1",
+      "text": "2️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "2",
+      "text": "3️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "3",
+      "text": "4️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "4",
+      "text": "5️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "5",
+      "text": "6️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "6",
+      "text": "7️⃣",
+      "voter_count": 1
+    },
+    {
+      "persistent_id": "7",
+      "text": "8️⃣",
+      "voter_count": 0
+    },
+    {
+      "persistent_id": "8",
+      "text": "9️⃣",
+      "voter_count": 0
+    }
+  ],
+  "totalVoterCount": 1,
+  "isClosed": false,
+  "updatedAt": "2026-09-05T08:28:29.168Z"
+}

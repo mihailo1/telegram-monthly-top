@@ -1,6 +1,6 @@
 {
   "id": "mto3wjy1-52bvq",
-  "status": "pending",
+  "status": "done",
   "createdAt": "2026-09-05T08:14:03.769Z",
   "processAfter": "2026-09-10T08:14:03.769Z",
   "chatId": "-1001173228085",
@@ -19,5 +19,8 @@
     "AgACAgIAAxUHapvOyjL0V0cAAZSOxodmejOBXzLfAAIvImsbosDhSOtUMlD2PtliAQADAgADdwADPQQ"
   ],
   "rangeLabel": "August 2026",
-  "pollQuestion": "Лучший дед августа 👴"
+  "pollQuestion": "Лучший дед августа 👴",
+  "winnerIndex": 1,
+  "winnerVotes": 6,
+  "completedAt": "2026-09-10T08:42:36.815Z"
 }

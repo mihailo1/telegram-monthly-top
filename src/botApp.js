@@ -409,6 +409,21 @@ export function createBot() {
   bot.command("help", sendHelp);
   bot.command("preview", runPreviewFromChat);
 
+  // Make a Sunday-style archive draft right now: /archive or /archive <themeKey>
+  bot.command("archive", async (ctx) => {
+    if (!isAdmin(ctx) || ctx.chat?.type !== "private") return;
+    const { createArchiveDraft } = await import("./archive/tick.js");
+    try {
+      await createArchiveDraft({
+        api: ctx.api,
+        id: `man-${Date.now().toString(36)}`,
+        themeKey: ctx.match?.trim() || undefined,
+      });
+    } catch (err) {
+      await ctx.reply(`Archive draft failed: ${String(err.message || err).slice(0, 300)}`);
+    }
+  });
+
   // Reply to a stray bot message (e.g. a phrase reply) with /rm to delete it —
   // works in channel Direct Messages too, where the native client can't.
   bot.command("rm", async (ctx) => {
@@ -872,6 +887,9 @@ export function createBot() {
     }
 
     const data = ctx.callbackQuery.data || "";
+
+    const { handleArchiveCallback } = await import("./archive/tick.js");
+    if (await handleArchiveCallback(ctx)) return;
 
     // Members browser nav
     if (data.startsWith("mnav:")) {

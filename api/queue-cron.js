@@ -5,6 +5,7 @@
  */
 import { Bot } from "grammy";
 import { assertBotToken, config as appConfig } from "../src/config.js";
+import { processArchiveTick } from "../src/archive/tick.js";
 import { pollChannelDirectMessages } from "../src/members/pollMonoforum.js";
 import { processMembersTick } from "../src/members/process.js";
 import { processQueueTick } from "../src/queue/process.js";
@@ -50,7 +51,15 @@ export default async function handler(req, res) {
     // 3) Admin queue (paused while members active)
     const admin = await processQueueTick({ bot });
 
-    res.status(200).json({ ok: true, poll, members, admin });
+    // 4) Sunday archive draft (no-op on other days)
+    let archive = [];
+    try {
+      archive = await processArchiveTick({ bot });
+    } catch (err) {
+      archive = [`archive_throw:${err.message}`];
+    }
+
+    res.status(200).json({ ok: true, poll, members, admin, archive });
   } catch (err) {
     console.error("queue-cron failed", err);
     res.status(500).json({ ok: false, error: String(err.message || err) });

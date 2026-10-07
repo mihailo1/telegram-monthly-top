@@ -10,6 +10,8 @@ Instructions for coding agents. Keep this file updated when architecture or prod
 4. **Reply phrases** — immediate → local pick from `reply-phrases.json` (**no neural net on Vercel**): default `distill` (hashed n-grams → tiny projector ≈ e5, cosine vs precomputed phrase vectors) or `bm25`; `PHRASE_PICKER=random|bm25|distill`. Train offline: `npm run phrases:embed` then `npm run phrases:train`. Deferred → `Уже был пост недавно, запостим в HH:MM`. One reply per author/topic per 60s (prefer caption/text).
 5. **Poll → avatar** — `scheduleAvatarJob` on monthly publish; after `AVATAR_POLL_DELAY_DAYS` (default 5), `avatar-cron` (twice daily) reads cached vote counts from `poll` webhook updates (`monthly/pollState.js`) and calls `setChatPhoto` with the leading option's photo. Poll is never stopped — it stays open for the channel.
 
+6. **Sunday archive** — every Sunday after `ARCHIVE_HOUR` (default 10, local) `processArchiveTick` (inside `queue-cron`) DMs the admin a themed album of photos older than a year, from `src/data/archive-index.json` (rebuild with `node scripts/build-archive-index.mjs`). Themes are tag keyword groups in `src/archive/themes.js`. The caption ("Архивное: дедушки …") comes from Gemini (`GEMINI_API_KEY`, then `GEMINI_API_KEY_BACKUP` on any error), with a template fallback. Buttons: Post / Another / Skip, handled by `handleArchiveCallback`. Posting counts as the day's admin post. `/archive [themeKey]` makes a draft on demand.
+
 **Preview-first** for monthly top: never auto-publish monthly poll to the channel without ✅.
 
 ## Posting rules (1h pulse)
@@ -53,6 +55,7 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 | `src/scheduler/dayState.js` | Per-day admin/members counters |
 | `src/format.js` | Monthly poll title/options (channel historical locale) |
 | `src/monthly/avatarJob.js` | Delayed poll winner → channel avatar |
+| `src/archive/*` | Sunday archive: theme pick, Gemini caption, draft + buttons, state |
 | `src/alerts.js` | Deduplicated admin DM alerts: overdue post, empty/low queue, post failure |
 | `src/monthly/pollState.js` | Live vote-count cache from `poll` webhook updates |
 | `src/data/reply-phrases.json` | Quote corpus for author replies |
@@ -70,7 +73,7 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 ## Coding rules
 
 1. **Language:** Code, comments, docs, and **admin bot chrome** in **English**.  
-   Allowed non-English: `reply-phrases.json` (corpus) and monthly poll strings in `format.js` (channel product copy).
+   Allowed non-English: `reply-phrases.json` (corpus), monthly poll strings in `format.js`, and archive theme phrases / caption prefix in `src/archive/` (channel product copy).
 2. **Secrets:** Only via env / Vercel env. Never commit `.env`, sessions, tokens.
 3. **Serverless:** No `setTimeout`-only album buffering without `waitUntil` / Blob parts. Persist across invocations with Blob.
 4. **Pure core:** Keep `rank.js` free of I/O.
@@ -81,7 +84,7 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 
 ## Env (see `.env.example`)
 
-`BOT_TOKEN`, `ADMIN_ID`, `GROUP_CHAT_ID`, `CHANNEL_USERNAME`, `API_ID`, `API_HASH`, `STRING_SESSION`, `CRON_SECRET`, `BLOB_READ_WRITE_TOKEN`, `PUBLIC_URL`, `APP_TZ`, optional `TOP_BASE`/`TOP_MAX`/`WEBHOOK_SECRET`/`ALERT_OVERDUE_MIN` (default 45)/`ALERT_LOW_QUEUE` (default 3).
+`BOT_TOKEN`, `ADMIN_ID`, `GROUP_CHAT_ID`, `CHANNEL_USERNAME`, `API_ID`, `API_HASH`, `STRING_SESSION`, `CRON_SECRET`, `BLOB_READ_WRITE_TOKEN`, `PUBLIC_URL`, `APP_TZ`, optional `TOP_BASE`/`TOP_MAX`/`WEBHOOK_SECRET`/`ALERT_OVERDUE_MIN` (default 45)/`ALERT_LOW_QUEUE` (default 3)/`GEMINI_API_KEY`/`GEMINI_API_KEY_BACKUP`/`GEMINI_MODEL`/`ARCHIVE_HOUR`.
 
 ## Commands
 

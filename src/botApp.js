@@ -5,8 +5,18 @@
  * Photos → queue (album → one “Uploaded N” ack)
  * Queue → browse with ◀️▶️, post now, delete
  */
-import { Bot, InlineKeyboard, Keyboard } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import { assertBotToken, config } from "./config.js";
+import {
+  archiveMenuView,
+  BOT_COMMANDS,
+  BTN,
+  handleMenuCallback,
+  helpText,
+  mainKeyboard,
+  moreView,
+  todayView,
+} from "./menu.js";
 import { loadPending, updatePending } from "./pending.js";
 import { publishAlbumAndPoll } from "./publish.js";
 import {
@@ -42,32 +52,6 @@ import {
   listMembersActive,
   loadMembersQueue,
 } from "./members/store.js";
-
-export const BTN = {
-  preview: "📊 Preview",
-  queue: "📋 Queue",
-  members: "👥 Members queue",
-  help: "ℹ️ Help",
-};
-
-export function mainKeyboard() {
-  return new Keyboard()
-    .text(BTN.preview)
-    .text(BTN.queue)
-    .row()
-    .text(BTN.members)
-    .text(BTN.help)
-    .resized()
-    .persistent();
-}
-
-const BOT_COMMANDS = [
-  { command: "start", description: "Menu" },
-  { command: "preview", description: "Monthly top preview" },
-  { command: "queue", description: "Admin media queue" },
-  { command: "members", description: "Members (UGC) queue" },
-  { command: "help", description: "Help" },
-];
 
 export async function setupBotMenu(bot) {
   await bot.api.setMyCommands(BOT_COMMANDS);
@@ -173,42 +157,19 @@ export function createBot() {
       await ctx.reply("Access denied (not ADMIN_ID).");
       return;
     }
-    const state = await loadQueue();
-    const active = countActive(state);
-    await ctx.reply(
-      [
-        "<b>monthly-top + daily queue</b>",
-        "",
-        `channel: @${config.channelUsername}`,
-        `in queue: <b>${active}</b>`,
-        "",
-        "📊 Preview — monthly top",
-        "📋 Queue — your admin queue",
-        "👥 Members queue — channel Direct Messages",
-        "ℹ️ Help",
-        "",
-        "📷 To this bot (you): admin queue.",
-        "Channel DMs: members queue (priority).",
-      ].join("\n"),
-      { parse_mode: "HTML", reply_markup: mainKeyboard() },
-    );
+    const view = await todayView();
+    await ctx.reply(view.text, {
+      parse_mode: "HTML",
+      reply_markup: view.keyboard,
+    });
+    await ctx.reply("Меню внизу 👇", { reply_markup: mainKeyboard() });
   }
 
   async function sendHelp(ctx) {
-    await ctx.reply(
-      [
-        "<b>Help</b>",
-        "",
-        "<b>Monthly top</b> — 📊 Preview → ✅/❌ to channel",
-        "",
-        "<b>Daily media</b>",
-        "• Photos and <b>videos</b> in queue (mixed albums OK)",
-        "• Album → one “📷 Uploaded N” summary",
-        "• 📋 Queue — ◀️▶️, ✅ post now, 🗑 delete",
-        "• 1 media/day · 10:00–22:00 MSK · next-day notify",
-      ].join("\n"),
-      { parse_mode: "HTML", reply_markup: mainKeyboard() },
-    );
+    await ctx.reply(helpText(), {
+      parse_mode: "HTML",
+      reply_markup: mainKeyboard(),
+    });
   }
 
   async function runPreviewFromChat(ctx) {
@@ -384,10 +345,8 @@ export function createBot() {
       await bot.api.sendMessage(
         chatId,
         [
-          `📷 <b>Uploaded ${uploaded}</b> file(s) to the queue.`,
-          `Total in queue: <b>${total}</b>`,
-          "",
-          "Upload complete ✅",
+          `📷 <b>Добавлено: ${uploaded}</b>`,
+          `Всего в очереди: <b>${total}</b>`,
         ].join("\n"),
         { parse_mode: "HTML", reply_markup: mainKeyboard() },
       );
@@ -405,6 +364,11 @@ export function createBot() {
 
   // --- Commands ---
   bot.command("start", sendWelcome);
+  bot.command("today", async (ctx) => {
+    const deny = requireAdminPrivate(ctx);
+    if (deny) return ctx.reply(deny);
+    await replyView(ctx, await todayView());
+  });
   bot.command("menu", sendWelcome);
   bot.command("help", sendHelp);
   bot.command("preview", runPreviewFromChat);
@@ -422,15 +386,20 @@ export function createBot() {
     );
   });
 
-  // Make a Sunday-style archive draft right now: /archive or /archive <themeKey>
+  // /archive opens the theme picker; /archive <themeKey> drafts right away
   bot.command("archive", async (ctx) => {
     if (!isAdmin(ctx) || ctx.chat?.type !== "private") return;
+    const themeKey = ctx.match?.trim();
+    if (!themeKey) {
+      await replyView(ctx, archiveMenuView());
+      return;
+    }
     const { createArchiveDraft } = await import("./archive/tick.js");
     try {
       await createArchiveDraft({
         api: ctx.api,
         id: `man-${Date.now().toString(36)}`,
-        themeKey: ctx.match?.trim() || undefined,
+        themeKey,
       });
     } catch (err) {
       await ctx.reply(`Archive draft failed: ${String(err.message || err).slice(0, 300)}`);
@@ -640,7 +609,25 @@ export function createBot() {
     }
     await showMembersBrowser(ctx, 0, "send");
   });
-  bot.hears(BTN.help, sendHelp);
+  async function replyView(ctx, view) {
+    await ctx.reply(view.text, { parse_mode: "HTML", reply_markup: view.keyboard });
+  }
+
+  bot.hears(BTN.today, async (ctx) => {
+    const deny = requireAdminPrivate(ctx);
+    if (deny) return ctx.reply(deny);
+    await replyView(ctx, await todayView());
+  });
+  bot.hears(BTN.archive, async (ctx) => {
+    const deny = requireAdminPrivate(ctx);
+    if (deny) return ctx.reply(deny);
+    await replyView(ctx, archiveMenuView());
+  });
+  bot.hears(BTN.more, async (ctx) => {
+    const deny = requireAdminPrivate(ctx);
+    if (deny) return ctx.reply(deny);
+    await replyView(ctx, await moreView());
+  });
 
   // --- Incoming photo / video ---
   // Admin in bot DM → admin queue
@@ -903,6 +890,7 @@ export function createBot() {
 
     const { handleArchiveCallback } = await import("./archive/tick.js");
     if (await handleArchiveCallback(ctx)) return;
+    if (await handleMenuCallback(ctx)) return;
 
     // Members browser nav
     if (data.startsWith("mnav:")) {

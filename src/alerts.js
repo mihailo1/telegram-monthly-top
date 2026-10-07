@@ -30,7 +30,7 @@ function useRemote() {
   );
 }
 
-/** @returns {Promise<{ sent: Record<string, string> }>} */
+/** @returns {Promise<{ sent: Record<string, string>, muted?: Record<string, boolean> }>} */
 async function loadAlertState() {
   try {
     if (useRemote()) return await getJson(BLOB_KEY);
@@ -63,6 +63,7 @@ async function saveAlertState(state) {
  */
 export async function sendAlertOnce(bot, key, text, cooldownMs, opts = {}) {
   const state = await loadAlertState();
+  if (opts.category && state.muted?.[opts.category]) return false;
   const sent = state.sent || {};
   const last = sent[key] ? new Date(sent[key]).getTime() : 0;
   if (Date.now() - last < cooldownMs) return false;
@@ -72,7 +73,7 @@ export async function sendAlertOnce(bot, key, text, cooldownMs, opts = {}) {
     if (now - new Date(at).getTime() > KEEP_MS) delete sent[k];
   }
   sent[key] = new Date(now).toISOString();
-  await saveAlertState({ sent });
+  await saveAlertState({ ...state, sent });
 
   try {
     await bot.api.sendMessage(assertAdminId(), text, {
@@ -84,9 +85,23 @@ export async function sendAlertOnce(bot, key, text, cooldownMs, opts = {}) {
   } catch (err) {
     console.error("alert send failed", key, err.message);
     delete sent[key];
-    await saveAlertState({ sent }).catch(() => {});
+    await saveAlertState({ ...state, sent }).catch(() => {});
     return false;
   }
+}
+
+/** Alert categories the admin switched off from the menu. */
+export async function getMuted() {
+  return (await loadAlertState()).muted || {};
+}
+
+/** @returns {Promise<boolean>} true if the category is now muted */
+export async function toggleMuted(category) {
+  const state = await loadAlertState();
+  const muted = { ...(state.muted || {}) };
+  muted[category] = !muted[category];
+  await saveAlertState({ sent: state.sent || {}, ...state, muted });
+  return muted[category];
 }
 
 function formatDuration(ms) {
@@ -155,7 +170,7 @@ export async function checkQueueAlerts(opts = {}) {
       "low",
       `🪫 <b>Queue is running low</b>\n${active} item(s) left, about ${active} day(s) of posts.`,
       24 * HOUR_MS,
-      { silent: true },
+      { silent: true, category: "low" },
     );
   }
 

@@ -49,7 +49,8 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 
 | Path | Responsibility |
 |------|----------------|
-| `src/botApp.js` | Commands, keyboards, ingest, browsers |
+| `src/botApp.js` | Commands, ingest, browsers, wiring |
+| `src/menu.js` | Russian admin menu: reply keyboard, Today dashboard, archive theme picker, More panel (alert toggles) |
 | `src/queue/*` | Admin media queue store, tick, album batching |
 | `src/members/*` | UGC store, place/post, monoforum poll, browser session |
 | `src/scheduler/dayState.js` | Per-day admin/members counters |
@@ -74,7 +75,7 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 ## Coding rules
 
 1. **Language:** Code, comments, docs, and **admin bot chrome** in **English**.  
-   Allowed non-English: `reply-phrases.json` (corpus), monthly poll strings in `format.js`, and archive theme phrases / caption prefix in `src/archive/` (channel product copy).
+   Allowed non-English: `reply-phrases.json` (corpus), monthly poll strings in `format.js`, archive theme phrases / caption prefix in `src/archive/` (channel product copy), and the admin menu labels and texts in `src/menu.js` (Russian UI copy).
 2. **Secrets:** Only via env / Vercel env. Never commit `.env`, sessions, tokens.
 3. **Serverless:** No `setTimeout`-only album buffering without `waitUntil` / Blob parts. Persist across invocations with Blob.
 4. **Pure core:** Keep `rank.js` free of I/O.

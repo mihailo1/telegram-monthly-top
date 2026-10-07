@@ -30,5 +30,6 @@ export async function checkDeployNotice(bot) {
 
   return sendAlertOnce(bot, `deploy:${identity}`, lines.join("\n"), 30 * DAY_MS, {
     silent: true,
+    category: "deploy",
   });
 }

@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Bot, InlineKeyboard } from "grammy";
+import { alertPostError, checkQueueAlerts } from "../alerts.js";
 import { assertAdminId, assertBotToken, config } from "../config.js";
 import {
   countMembersActive,
@@ -147,6 +148,9 @@ export async function processQueueTick(opts = {}) {
         });
         if (!postResult.ok) {
           summary.actions.push(`post_error:${postResult.error}`);
+          await alertPostError(bot, scheduled.id, postResult.error).catch(
+            (err) => console.error("alertPostError failed", err.message),
+          );
           if (postResult.error !== "no_channel") {
             return summary;
           }
@@ -167,6 +171,7 @@ export async function processQueueTick(opts = {}) {
     if (queued.length === 0) {
       summary.actions.push("queue_empty");
       summary.active = 0;
+      await runAlerts(bot, state, membersActive, summary);
       return summary;
     }
 
@@ -246,7 +251,17 @@ export async function processQueueTick(opts = {}) {
       }
     : null;
 
+  await runAlerts(bot, state, membersActive, summary);
   return summary;
+}
+
+async function runAlerts(bot, state, membersActive, summary) {
+  try {
+    const fired = await checkQueueAlerts({ bot, state, membersActive });
+    for (const key of fired) summary.actions.push(`alert:${key}`);
+  } catch (err) {
+    console.error("queue alerts failed", err);
+  }
 }
 
 async function tryClaimNotify(itemId) {

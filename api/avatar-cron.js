@@ -2,10 +2,13 @@
  * Twice-daily tick: resolve due monthly-poll → avatar jobs.
  * Split out from queue-cron (which ticks every 15m) since a 5-day delay
  * doesn't need 15-minute resolution — see .github/workflows/avatar-tick.yml.
+ * Also runs the queue alert check: its triggers are independent of
+ * queue-cron's, so it can flag a post that queue-cron never delivered.
  *
  * Auth: Authorization: Bearer CRON_SECRET (Vercel Cron sends it) OR ?secret=CRON_SECRET
  */
 import { Bot } from "grammy";
+import { checkQueueAlerts } from "../src/alerts.js";
 import { assertBotToken, config as appConfig } from "../src/config.js";
 import { processAvatarJobs } from "../src/monthly/avatarJob.js";
 
@@ -36,7 +39,13 @@ export default async function handler(req, res) {
     const bot = new Bot(assertBotToken());
     await bot.init();
     const avatar = await processAvatarJobs({ bot });
-    res.status(200).json({ ok: true, avatar });
+    let alerts = [];
+    try {
+      alerts = await checkQueueAlerts({ bot });
+    } catch (err) {
+      console.error("queue alerts failed", err);
+    }
+    res.status(200).json({ ok: true, avatar, alerts });
   } catch (err) {
     console.error("avatar-cron failed", err);
     res.status(500).json({ ok: false, error: String(err.message || err) });

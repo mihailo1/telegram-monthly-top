@@ -1,0 +1,21 @@
+{
+  "id": "man-muyoy27q",
+  "baseId": "man-muyoy27q",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-07T22:40:43.400Z",
+  "theme": "caps",
+  "caption": "Архивное: самые стильные дедушки в кепках 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "681_0",
+    "847_0",
+    "418_0"
+  ],
+  "albumMessageIds": [
+    543,
+    544,
+    545
+  ],
+  "adminMessageId": 546
+}

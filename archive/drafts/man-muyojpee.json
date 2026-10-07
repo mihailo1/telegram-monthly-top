@@ -1,0 +1,23 @@
+{
+  "id": "man-muyojpee",
+  "baseId": "man-muyojpee",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-07T22:29:28.561Z",
+  "theme": "bus",
+  "caption": "Архивное: дедушки в транспорте и в пути 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "701_0",
+    "317_0",
+    "265_0",
+    "682_0",
+    "343_0",
+    "752_0",
+    "31_0",
+    "232_0",
+    "594_0",
+    "686_0"
+  ],
+  "adminMessageId": 536
+}

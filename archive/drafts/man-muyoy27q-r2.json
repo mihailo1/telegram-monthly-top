@@ -1,0 +1,23 @@
+{
+  "id": "man-muyoy27q-r2",
+  "baseId": "man-muyoy27q",
+  "round": 2,
+  "status": "pending",
+  "createdAt": "2026-10-07T23:07:35.400Z",
+  "theme": "metro",
+  "caption": "Архивное: стильные дедушки в метро",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "14_0",
+    "333_0",
+    "283_0",
+    "890_0"
+  ],
+  "albumMessageIds": [
+    547,
+    548,
+    549,
+    550
+  ],
+  "adminMessageId": 551
+}

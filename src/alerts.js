@@ -16,7 +16,7 @@ import { getJson, put as storePut } from "./storage/blob.js";
 
 const LOCAL_PATH = path.resolve("./data/alerts.json");
 const BLOB_KEY = "scheduler/alerts.json";
-const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+const KEEP_MS = 35 * 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 const OVERDUE_MS = Number(process.env.ALERT_OVERDUE_MIN || 45) * 60 * 1000;
@@ -61,7 +61,7 @@ async function saveAlertState(state) {
  * every 15 minutes; a failed send releases the key for the next tick.
  * @returns {Promise<boolean>} true if sent
  */
-async function sendAlertOnce(bot, key, text, cooldownMs, opts = {}) {
+export async function sendAlertOnce(bot, key, text, cooldownMs, opts = {}) {
   const state = await loadAlertState();
   const sent = state.sent || {};
   const last = sent[key] ? new Date(sent[key]).getTime() : 0;

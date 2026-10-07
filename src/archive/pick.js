@@ -25,7 +25,7 @@ function shuffle(arr, rng) {
  * @param {string[]} [opts.usedIds]
  * @param {string[]} [opts.recentThemes]
  * @param {string} [opts.themeKey] force a theme
- * @param {number} [opts.size] photos per post (2 to 10)
+ * @param {number} [opts.size] photos per post (2 to 10); random 4 to 10 when omitted
  * @param {number} [opts.minAgeDays]
  * @param {number} [opts.nowMs]
  * @param {() => number} [opts.rng]
@@ -37,7 +37,7 @@ export function pickArchiveSet(opts) {
     usedIds = [],
     recentThemes = [],
     themeKey,
-    size = 8,
+    size,
     minAgeDays = 365,
     nowMs = Date.now(),
     rng = Math.random,
@@ -62,7 +62,7 @@ export function pickArchiveSet(opts) {
   if (candidates.length === 0) return null;
 
   const chosen = candidates[Math.floor(rng() * candidates.length)];
-  const n = Math.min(10, Math.max(2, size));
+  const n = Math.min(10, Math.max(2, size ?? 4 + Math.floor(rng() * 7)));
   return {
     theme: chosen.theme,
     photos: shuffle(chosen.matches, rng).slice(0, n),

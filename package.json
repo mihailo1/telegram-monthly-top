@@ -1,6 +1,6 @@
 {
   "name": "telegram-monthly-top",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Monthly top posts by reactions → album + poll (preview-first), Vercel-ready",
   "type": "module",
   "engines": {
@@ -16,7 +16,8 @@
     "env-check": "node scripts/print-env-for-vercel.mjs",
     "phrases:embed": "node scripts/precompute-phrase-embeddings.mjs",
     "phrases:train": "node scripts/train-phrase-projector.mjs",
-    "vercel-dev": "vercel dev"
+    "vercel-dev": "vercel dev",
+    "deploy": "bash scripts/deploy.sh"
   },
   "keywords": [
     "telegram",

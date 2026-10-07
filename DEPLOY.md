@@ -97,3 +97,11 @@ In Telegram: open the bot → `/start` → **Preview** / **Queue** / **Members q
 - Function `maxDuration` is set to 60s where needed.
 - Treat `STRING_SESSION` like a password (full account access).
 - After `npm run login` again, update `STRING_SESSION` on Vercel and redeploy if required.
+
+## 7. Deploy (use this, not bare `vercel --prod`)
+
+```bash
+npm run deploy
+```
+
+`scripts/deploy.sh` runs `vercel --prod` with the commit, subject and build time as runtime env, then pokes `/api/queue-cron`. The bot DMs the admin `Deployed vX (commit)` once per deployment. `/version` shows the same info on demand. There is no GitHub auto-deploy, so pushing alone does not deploy.

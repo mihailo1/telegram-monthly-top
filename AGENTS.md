@@ -56,6 +56,7 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 | `src/format.js` | Monthly poll title/options (channel historical locale) |
 | `src/monthly/avatarJob.js` | Delayed poll winner → channel avatar |
 | `src/archive/*` | Sunday archive: theme pick, Gemini caption, draft + buttons, state |
+| `src/version.js`, `src/deployNotice.js` | Version info (package.json + deploy env) and the once-per-deployment admin DM |
 | `src/alerts.js` | Deduplicated admin DM alerts: overdue post, empty/low queue, post failure |
 | `src/monthly/pollState.js` | Live vote-count cache from `poll` webhook updates |
 | `src/data/reply-phrases.json` | Quote corpus for author replies |
@@ -84,7 +85,7 @@ bot.on("poll") ──► pollState.js (Blob) ──► read by processAvatarJobs
 
 ## Env (see `.env.example`)
 
-`BOT_TOKEN`, `ADMIN_ID`, `GROUP_CHAT_ID`, `CHANNEL_USERNAME`, `API_ID`, `API_HASH`, `STRING_SESSION`, `CRON_SECRET`, `BLOB_READ_WRITE_TOKEN`, `PUBLIC_URL`, `APP_TZ`, optional `TOP_BASE`/`TOP_MAX`/`WEBHOOK_SECRET`/`ALERT_OVERDUE_MIN` (default 45)/`ALERT_LOW_QUEUE` (default 3)/`GEMINI_API_KEY`/`GEMINI_API_KEY_BACKUP`/`GEMINI_MODEL`/`ARCHIVE_HOUR`.
+`BOT_TOKEN`, `ADMIN_ID`, `GROUP_CHAT_ID`, `CHANNEL_USERNAME`, `API_ID`, `API_HASH`, `STRING_SESSION`, `CRON_SECRET`, `BLOB_READ_WRITE_TOKEN`, `PUBLIC_URL`, `APP_TZ`, optional `TOP_BASE`/`TOP_MAX`/`WEBHOOK_SECRET`/`ALERT_OVERDUE_MIN` (default 45)/`ALERT_LOW_QUEUE` (default 3)/`GEMINI_API_KEY`/`GEMINI_API_KEY_BACKUP`/`GEMINI_MODELS`/`ARCHIVE_HOUR`.
 
 ## Commands
 
@@ -94,6 +95,7 @@ npm run login
 npm run preview-month
 npm run set-webhook
 npm run env-check
+npm run deploy   # vercel --prod + version env + deploy notice DM (no git auto-deploy)
 ```
 
 ## Status

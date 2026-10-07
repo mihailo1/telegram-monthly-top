@@ -6,6 +6,7 @@
 import { Bot } from "grammy";
 import { assertBotToken, config as appConfig } from "../src/config.js";
 import { processArchiveTick } from "../src/archive/tick.js";
+import { checkDeployNotice } from "../src/deployNotice.js";
 import { pollChannelDirectMessages } from "../src/members/pollMonoforum.js";
 import { processMembersTick } from "../src/members/process.js";
 import { processQueueTick } from "../src/queue/process.js";
@@ -37,6 +38,14 @@ export default async function handler(req, res) {
     const bot = new Bot(assertBotToken());
     await bot.init();
 
+    // 0) Tell the admin about a fresh deployment (once per deployment)
+    let deployNotice = false;
+    try {
+      deployNotice = await checkDeployNotice(bot);
+    } catch (err) {
+      console.error("deploy notice failed", err);
+    }
+
     // 1) Pull new channel DMs into members queue
     let poll = { scanned: 0, ingested: 0, actions: ["skipped"] };
     try {
@@ -59,7 +68,7 @@ export default async function handler(req, res) {
       archive = [`archive_throw:${err.message}`];
     }
 
-    res.status(200).json({ ok: true, poll, members, admin, archive });
+    res.status(200).json({ ok: true, deployNotice, poll, members, admin, archive });
   } catch (err) {
     console.error("queue-cron failed", err);
     res.status(500).json({ ok: false, error: String(err.message || err) });

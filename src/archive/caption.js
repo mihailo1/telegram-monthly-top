@@ -4,7 +4,12 @@
  * quota error on one falls over to the other. If both fail the post still
  * goes out with a template caption.
  */
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+// Newer API keys can no longer use 2.5-flash and older ones may not have 3.8 yet,
+// so each key tries every model in order.
+const MODELS = (process.env.GEMINI_MODELS || "gemini-3.8-flash,gemini-2.5-flash")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
 const ENDPOINT = (model) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 const PREFIX = "Архивное:";
@@ -28,6 +33,7 @@ function buildPrompt(theme, photos) {
   return [
     "You write captions for a Russian Telegram channel that posts photos of stylish elderly men (dedushki) spotted on city streets.",
     "This is an archive post: several old photos sharing one theme.",
+    "Mention the theme and, where it fits, the word дедушки.",
     `Theme: elderly men ${theme.phrase} (Russian phrase).`,
     `Sample descriptions of the photos:\n${samples}`,
     "",
@@ -43,19 +49,20 @@ function cleanCaption(text) {
     .split("\n")[0]
     .replace(/^["«“'\s]+|["»”'\s]+$/g, "")
     .trim();
-  if (!line.startsWith(PREFIX) || line.length > MAX_LEN + 4) return null;
+  // Reject a bare "Архивное:" (a truncated reply) as well as overlong lines
+  if (!line.startsWith(PREFIX) || line.length < PREFIX.length + 6 || line.length > MAX_LEN + 4) return null;
   return line;
 }
 
-async function askGemini(key, prompt, fetchImpl) {
-  const res = await fetchImpl(ENDPOINT(MODEL), {
+async function askGemini(key, model, prompt, fetchImpl) {
+  const res = await fetchImpl(ENDPOINT(model), {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.9,
-        maxOutputTokens: 120,
+        maxOutputTokens: 1024,
         thinkingConfig: { thinkingBudget: 0 },
       },
     }),
@@ -66,12 +73,17 @@ async function askGemini(key, prompt, fetchImpl) {
     throw err;
   }
   const json = await res.json();
-  return json?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+  const candidate = json?.candidates?.[0];
+  // A cut-off reply (MAX_TOKENS, safety) must not be posted half-finished
+  if (candidate?.finishReason && candidate.finishReason !== "STOP") {
+    throw new Error(`gemini finish ${candidate.finishReason}`);
+  }
+  return candidate?.content?.parts?.map((p) => p.text).join("") || "";
 }
 
 /**
  * @param {{ theme: object, photos: { desc: string }[], keys?: string[], fetchImpl?: typeof fetch }} opts
- * @returns {Promise<{ caption: string, source: string }>} source: "gemini:main" | "gemini:backup" | "template"
+ * @returns {Promise<{ caption: string, source: string }>} source: "gemini:main <model>" | "gemini:backup <model>" | "template"
  */
 export async function buildCaption({
   theme,
@@ -81,13 +93,20 @@ export async function buildCaption({
 }) {
   const prompt = buildPrompt(theme, photos);
   for (let i = 0; i < keys.length; i++) {
-    try {
-      const caption = cleanCaption(await askGemini(keys[i], prompt, fetchImpl));
-      if (caption) {
-        return { caption, source: i === 0 ? "gemini:main" : "gemini:backup" };
+    for (const model of MODELS) {
+      try {
+        const caption = cleanCaption(
+          await askGemini(keys[i], model, prompt, fetchImpl),
+        );
+        if (caption) {
+          return {
+            caption,
+            source: `${i === 0 ? "gemini:main" : "gemini:backup"} ${model}`,
+          };
+        }
+      } catch (err) {
+        console.warn(`gemini key ${i + 1} ${model} failed:`, err.status || err.message);
       }
-    } catch (err) {
-      console.warn(`gemini key ${i + 1} failed:`, err.status || err.message);
     }
   }
   return { caption: templateCaption(theme), source: "template" };

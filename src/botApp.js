@@ -409,6 +409,19 @@ export function createBot() {
   bot.command("help", sendHelp);
   bot.command("preview", runPreviewFromChat);
 
+  bot.command("version", async (ctx) => {
+    if (!isAdmin(ctx)) return;
+    const { appVersion } = await import("./version.js");
+    const v = appVersion();
+    await ctx.reply(
+      [
+        `Version ${v.version}${v.commit ? ` (${v.commit})` : ""}`,
+        v.subject,
+        v.builtAt ? `Built ${v.builtAt}` : "",
+      ].filter(Boolean).join("\n"),
+    );
+  });
+
   // Make a Sunday-style archive draft right now: /archive or /archive <themeKey>
   bot.command("archive", async (ctx) => {
     if (!isAdmin(ctx) || ctx.chat?.type !== "private") return;

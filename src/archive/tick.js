@@ -1,7 +1,10 @@
 /**
  * Sunday archive post: every Sunday the bot DMs the admin a themed album of
- * old photos (older than a year) with a Gemini-written caption and
- * Post / Another / Skip buttons. Nothing reaches the channel without a tap.
+ * 3 to 5 old photos (older than a year) with a Gemini-written caption. The
+ * admin can post it, rewrite the caption, regenerate it, pick specific photos
+ * or switch theme. Only posted photos are marked used, so everything the
+ * admin did not pick stays available for other sets. Nothing reaches the
+ * channel without a tap.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -12,20 +15,26 @@ import { localDayString, wallClock } from "../queue/time.js";
 import { markChannelPosted } from "../scheduler/channelPulse.js";
 import { incrementDayPost } from "../scheduler/dayState.js";
 import { buildCaption } from "./caption.js";
-import { pickArchiveSet } from "./pick.js";
+import { MAX_PICK, MIN_PICK, pickArchiveSet, poolForTheme } from "./pick.js";
 import {
+  clearAwaiting,
   createDraftOnce,
+  getAwaiting,
   loadArchiveState,
   loadDraft,
   recordArchivePost,
   saveDraft,
+  setAwaiting,
 } from "./state.js";
+import { ARCHIVE_THEMES } from "./themes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_PATH = path.join(__dirname, "..", "data", "archive-index.json");
 const DRAFT_HOUR = Number(process.env.ARCHIVE_HOUR || 10);
 const MAX_ATTEMPTS = 3;
 const STALE_CLAIM_MS = 10 * 60 * 1000;
+const AWAITING_TTL_MS = 15 * 60 * 1000;
+const POOL_SIZE = 10;
 
 /** @type {{ id: string, date: number, url: string, link: string, tags: string[], desc: string }[] | null} */
 let cachedPhotos = null;
@@ -36,6 +45,13 @@ function loadArchivePhotos() {
   }
   return cachedPhotos;
 }
+
+function photosByIds(ids) {
+  const byId = new Map(loadArchivePhotos().map((p) => [p.id, p]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+}
+
+const themeByKey = (key) => ARCHIVE_THEMES.find((t) => t.key === key);
 
 function isSunday(tz, now) {
   const { y, m, d } = wallClock(tz, now);
@@ -48,30 +64,92 @@ async function downloadPhoto(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-/** Send the set as one album with the caption on the first photo. */
-async function sendAlbum(api, chatId, photos, caption) {
-  const buffers = [];
-  for (const p of photos) {
-    try {
-      buffers.push({ id: p.id, buf: await downloadPhoto(p.url) });
-    } catch (err) {
-      console.warn("archive photo skipped", p.id, err.message);
-    }
-  }
-  if (buffers.length < 2) throw new Error("fewer than 2 archive photos downloaded");
-  const media = buffers.map((b, i) => ({
+/**
+ * Send photos as one album. With `numbered` every photo is captioned with its
+ * 1-based position (the picker); otherwise the caption goes on the first one.
+ */
+async function sendAlbum(api, chatId, photos, caption, { numbered = false } = {}) {
+  const downloaded = await Promise.all(
+    photos.map(async (p, i) => {
+      try {
+        return { n: i + 1, id: p.id, buf: await downloadPhoto(p.url) };
+      } catch (err) {
+        console.warn("archive photo skipped", p.id, err.message);
+        return null;
+      }
+    }),
+  );
+  const ok = downloaded.filter(Boolean);
+  if (ok.length < 2) throw new Error("fewer than 2 archive photos downloaded");
+  const media = ok.map((b, i) => ({
     type: "photo",
     media: new InputFile(b.buf, `${b.id}.jpg`),
-    ...(i === 0 ? { caption } : {}),
+    ...(numbered ? { caption: String(b.n) } : i === 0 ? { caption } : {}),
   }));
   return api.sendMediaGroup(chatId, media);
 }
 
+function captionSourceLabel(source) {
+  if (source === "manual") return "твоя";
+  if (source === "template") return "шаблон";
+  return "Gemini";
+}
+
+function controlText(draft) {
+  const theme = themeByKey(draft.theme);
+  return [
+    "🗃 <b>Черновик архивного поста</b>",
+    `Тема: <b>${theme?.phrase || draft.theme}</b> · ${draft.photoIds.length} фото`,
+    `Подпись: ${captionSourceLabel(draft.captionSource)}`,
+    `id: <code>${draft.id}</code>`,
+    "",
+    "Запостить в канал?",
+  ].join("\n");
+}
+
 function controlKeyboard(id) {
   return new InlineKeyboard()
-    .text("✅ Post", `arch:post:${id}`)
-    .text("🔄 Another", `arch:swap:${id}`)
-    .text("❌ Skip", `arch:skip:${id}`);
+    .text("✅ Запостить", `arch:post:${id}`)
+    .text("❌ Пропустить", `arch:skip:${id}`)
+    .row()
+    .text("✏️ Своя подпись", `arch:edit:${id}`)
+    .text("🤖 Новая подпись", `arch:cap:${id}`)
+    .row()
+    .text("🖼 Выбрать фото", `arch:pics:${id}`)
+    .text("🔄 Другая тема", `arch:swap:${id}`);
+}
+
+/** Send the album (with caption) and the control message, then save the ids. */
+async function sendPreview(api, draft) {
+  const adminId = assertAdminId();
+  const albumMsgs = await sendAlbum(api, adminId, photosByIds(draft.photoIds), draft.caption);
+  const control = await api.sendMessage(adminId, controlText(draft), {
+    parse_mode: "HTML",
+    reply_markup: controlKeyboard(draft.id),
+  });
+  draft.albumMessageIds = albumMsgs.map((m) => m.message_id);
+  draft.adminMessageId = control.message_id;
+  await saveDraft(draft);
+}
+
+/** Change the caption of the already sent preview album in place. */
+async function applyCaption(api, draft) {
+  const adminId = assertAdminId();
+  try {
+    await api.editMessageCaption(adminId, draft.albumMessageIds[0], {
+      caption: draft.caption,
+    });
+    await api
+      .editMessageText(adminId, draft.adminMessageId, controlText(draft), {
+        parse_mode: "HTML",
+        reply_markup: controlKeyboard(draft.id),
+      })
+      .catch(() => {});
+    await saveDraft(draft);
+  } catch (err) {
+    console.warn("caption edit failed, resending preview", err.message);
+    await sendPreview(api, draft);
+  }
 }
 
 /**
@@ -97,7 +175,7 @@ export async function createArchiveDraft({
   if (!set) {
     await api.sendMessage(
       adminId,
-      "🗃 Archive: no theme has enough unused photos older than a year.",
+      "🗃 В архиве нет темы с достаточным числом неиспользованных фото старше года.",
     );
     return null;
   }
@@ -106,20 +184,6 @@ export async function createArchiveDraft({
     theme: set.theme,
     photos: set.photos,
   });
-
-  await sendAlbum(api, adminId, set.photos, caption);
-  const control = await api.sendMessage(
-    adminId,
-    [
-      "🗃 <b>Archive post draft</b>",
-      `Theme: <b>${set.theme.phrase}</b> · ${set.photos.length} photos`,
-      `Caption by: ${source}`,
-      `id: <code>${id}</code>`,
-      "",
-      "Post it to the channel?",
-    ].join("\n"),
-    { parse_mode: "HTML", reply_markup: controlKeyboard(id) },
-  );
 
   const draft = {
     id,
@@ -131,9 +195,8 @@ export async function createArchiveDraft({
     caption,
     captionSource: source,
     photoIds: set.photos.map((p) => p.id),
-    adminMessageId: control.message_id,
   };
-  await saveDraft(draft);
+  await sendPreview(api, draft);
   return draft;
 }
 
@@ -185,7 +248,7 @@ export async function processArchiveTick({ bot, nowMs = Date.now() }) {
     try {
       await bot.api.sendMessage(
         assertAdminId(),
-        `⚠️ Archive draft failed (attempt ${attempts}/${MAX_ATTEMPTS}): ${String(err.message || err).slice(0, 300)}`,
+        `⚠️ Не получилось собрать архивный черновик (попытка ${attempts}/${MAX_ATTEMPTS}): ${String(err.message || err).slice(0, 300)}`,
       );
     } catch {
       /* ignore */
@@ -194,6 +257,92 @@ export async function processArchiveTick({ bot, nowMs = Date.now() }) {
   }
 }
 
+// ---------------------------------------------------------------- picker
+
+function pickerText(draft) {
+  const n = (draft.pickSelected || []).length;
+  return [
+    "🖼 <b>Выбор фото</b>",
+    `Нажимай номера, чтобы выбрать от ${MIN_PICK} до ${MAX_PICK} фото. Остальные останутся для других подборок.`,
+    `Выбрано: <b>${n}</b>`,
+  ].join("\n");
+}
+
+function pickerKeyboard(draft) {
+  const selected = new Set(draft.pickSelected || []);
+  const kb = new InlineKeyboard();
+  draft.pool.forEach((photoId, i) => {
+    kb.text(`${selected.has(photoId) ? "✅" : ""}${i + 1}`, `arch:tog:${draft.id}:${i + 1}`);
+    if (i % 5 === 4) kb.row();
+  });
+  kb.row()
+    .text(`Готово (${selected.size})`, `arch:done:${draft.id}`)
+    .text("🔄 Другие", `arch:more:${draft.id}`)
+    .text("↩️ Назад", `arch:back:${draft.id}`);
+  return kb;
+}
+
+/** Send a numbered candidate album and the picker controls. */
+async function startPicker(api, draft) {
+  const adminId = assertAdminId();
+  const state = await loadArchiveState();
+  const selectedIds = draft.pickSelected || draft.photoIds;
+  const pool = poolForTheme({
+    photos: loadArchivePhotos(),
+    theme: themeByKey(draft.theme),
+    usedIds: state.usedIds,
+    selectedIds,
+    exclude: draft.pool || [],
+    count: POOL_SIZE,
+  });
+  draft.pool = pool.map((p) => p.id);
+  draft.pickSelected = selectedIds.filter((id) => draft.pool.includes(id));
+
+  await sendAlbum(api, adminId, pool, "", { numbered: true });
+  const control = await api.sendMessage(adminId, pickerText(draft), {
+    parse_mode: "HTML",
+    reply_markup: pickerKeyboard(draft),
+  });
+  draft.pickerMessageId = control.message_id;
+  await saveDraft(draft);
+}
+
+// ------------------------------------------------------- caption by text
+
+/**
+ * If the admin was asked for a caption, take this text message as the new
+ * caption. Returns true when the message was consumed.
+ * @param {import('grammy').Context} ctx
+ */
+export async function consumeCaptionInput(ctx) {
+  const awaiting = await getAwaiting();
+  if (!awaiting) return false;
+  if (Date.now() - new Date(awaiting.at).getTime() > AWAITING_TTL_MS) {
+    await clearAwaiting();
+    return false;
+  }
+  await clearAwaiting();
+  const draft = await loadDraft(awaiting.draftId);
+  if (!draft || draft.status !== "pending") {
+    await ctx.reply("Этот черновик уже не активен.");
+    return true;
+  }
+  draft.caption = ctx.message.text.trim().slice(0, 1000);
+  draft.captionSource = "manual";
+  await applyCaption(ctx.api, draft);
+  await ctx.reply("✏️ Подпись обновлена.");
+  return true;
+}
+
+export async function cancelCaptionInput(ctx) {
+  if (await getAwaiting()) {
+    await clearAwaiting();
+    await ctx.reply("Ок, подпись не меняю.");
+  }
+}
+
+// -------------------------------------------------------------- buttons
+
 /**
  * Handle the arch:* buttons. Returns true if the callback was ours.
  * @param {import('grammy').Context} ctx
@@ -201,14 +350,14 @@ export async function processArchiveTick({ bot, nowMs = Date.now() }) {
 export async function handleArchiveCallback(ctx) {
   const data = ctx.callbackQuery?.data || "";
   if (!data.startsWith("arch:")) return false;
-  const [, action, id] = data.split(":");
+  const [, action, id, arg] = data.split(":");
   const draft = id ? await loadDraft(id) : null;
   if (!draft) {
-    await ctx.answerCallbackQuery({ text: "Draft expired or missing", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "Черновик устарел или не найден", show_alert: true });
     return true;
   }
   if (draft.status !== "pending") {
-    await ctx.answerCallbackQuery({ text: `Already ${draft.status}`, show_alert: true });
+    await ctx.answerCallbackQuery({ text: `Уже: ${draft.status}`, show_alert: true });
     return true;
   }
 
@@ -218,14 +367,14 @@ export async function handleArchiveCallback(ctx) {
   };
 
   if (action === "skip") {
-    await ctx.answerCallbackQuery({ text: "Skipped" });
-    await finish("skipped", `❌ Skipped archive draft <code>${id}</code>.`);
+    await ctx.answerCallbackQuery({ text: "Пропущено" });
+    await finish("skipped", `❌ Архивный черновик <code>${id}</code> пропущен.`);
     return true;
   }
 
   if (action === "swap") {
-    await ctx.answerCallbackQuery({ text: "Picking another theme…" });
-    await finish("replaced", `🔄 Replaced <code>${id}</code> with a new draft.`);
+    await ctx.answerCallbackQuery({ text: "Ищу другую тему…" });
+    await finish("replaced", `🔄 <code>${id}</code> заменён новым черновиком.`);
     const baseId = draft.baseId || draft.id;
     const round = (draft.round || 1) + 1;
     await createArchiveDraft({
@@ -238,32 +387,129 @@ export async function handleArchiveCallback(ctx) {
     return true;
   }
 
+  if (action === "cap") {
+    await ctx.answerCallbackQuery({ text: "Пишу новую подпись…" });
+    const { caption, source } = await buildCaption({
+      theme: themeByKey(draft.theme),
+      photos: photosByIds(draft.photoIds),
+    });
+    draft.caption = caption;
+    draft.captionSource = source;
+    await applyCaption(ctx.api, draft);
+    return true;
+  }
+
+  if (action === "edit") {
+    await setAwaiting(id);
+    await ctx.answerCallbackQuery();
+    await ctx.reply("✏️ Пришли новую подпись одним сообщением. Отмена: /cancel");
+    return true;
+  }
+
+  if (action === "pics") {
+    await ctx.answerCallbackQuery({ text: "Собираю варианты…" });
+    draft.pickSelected = draft.photoIds;
+    draft.pool = [];
+    await startPicker(ctx.api, draft);
+    return true;
+  }
+
+  if (action === "more") {
+    await ctx.answerCallbackQuery({ text: "Другие варианты…" });
+    await ctx.editMessageText("🔄 Подобрал другие варианты ниже.").catch(() => {});
+    await startPicker(ctx.api, draft);
+    return true;
+  }
+
+  if (action === "tog") {
+    const photoId = (draft.pool || [])[Number(arg) - 1];
+    if (!photoId) {
+      await ctx.answerCallbackQuery({ text: "Нет такого фото", show_alert: true });
+      return true;
+    }
+    const sel = new Set(draft.pickSelected || []);
+    if (sel.has(photoId)) {
+      sel.delete(photoId);
+    } else if (sel.size >= MAX_PICK) {
+      await ctx.answerCallbackQuery({ text: `Максимум ${MAX_PICK} фото`, show_alert: true });
+      return true;
+    } else {
+      sel.add(photoId);
+    }
+    draft.pickSelected = draft.pool.filter((pid) => sel.has(pid));
+    await saveDraft(draft);
+    await ctx.answerCallbackQuery();
+    await ctx
+      .editMessageText(pickerText(draft), {
+        parse_mode: "HTML",
+        reply_markup: pickerKeyboard(draft),
+      })
+      .catch(() => {});
+    return true;
+  }
+
+  if (action === "back") {
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText("↩️ Выбор отменён, черновик остался прежним.").catch(() => {});
+    draft.pool = [];
+    draft.pickSelected = [];
+    await saveDraft(draft);
+    return true;
+  }
+
+  if (action === "done") {
+    const count = (draft.pickSelected || []).length;
+    if (count < MIN_PICK || count > MAX_PICK) {
+      await ctx.answerCallbackQuery({
+        text: `Нужно от ${MIN_PICK} до ${MAX_PICK} фото, сейчас ${count}`,
+        show_alert: true,
+      });
+      return true;
+    }
+    await ctx.answerCallbackQuery({ text: "Собираю черновик…" });
+    await ctx.editMessageText("✅ Выбор сохранён, новый черновик ниже.").catch(() => {});
+    await ctx.api
+      .editMessageText(
+        assertAdminId(),
+        draft.adminMessageId,
+        `🔄 Заменено новым вариантом ниже: <code>${id}</code>`,
+        { parse_mode: "HTML" },
+      )
+      .catch(() => {});
+    draft.photoIds = draft.pickSelected;
+    draft.pool = [];
+    draft.pickSelected = [];
+    await sendPreview(ctx.api, draft);
+    return true;
+  }
+
   if (action === "post") {
     const chatId = config.groupChatId;
     if (!chatId) {
-      await ctx.answerCallbackQuery({ text: "GROUP_CHAT_ID not set", show_alert: true });
+      await ctx.answerCallbackQuery({ text: "GROUP_CHAT_ID не задан", show_alert: true });
       return true;
     }
-    await ctx.answerCallbackQuery({ text: "Posting…" });
+    await ctx.answerCallbackQuery({ text: "Публикую…" });
     await saveDraft({ ...draft, status: "posting" });
     try {
-      const photos = loadArchivePhotos().filter((p) => draft.photoIds.includes(p.id));
-      await sendAlbum(ctx.api, chatId, photos, draft.caption);
+      await sendAlbum(ctx.api, chatId, photosByIds(draft.photoIds), draft.caption);
       await markChannelPosted("admin", id);
       await incrementDayPost("admin");
       await recordArchivePost(draft.theme, draft.photoIds);
-      await finish("posted", `✅ Archive post published to @${config.channelUsername}.\n<code>${id}</code>`);
+      await finish("posted", `✅ Архивный пост опубликован в @${config.channelUsername}.\n<code>${id}</code>`);
     } catch (err) {
       console.error("archive post failed", err);
       await saveDraft({ ...draft, status: "pending" });
-      await ctx.editMessageText(
-        `⚠️ Posting failed: ${String(err.message || err).slice(0, 300)}\nTap again to retry.`,
-        { reply_markup: controlKeyboard(id) },
-      ).catch(() => {});
+      await ctx
+        .editMessageText(
+          `⚠️ Не получилось опубликовать: ${String(err.message || err).slice(0, 300)}\nНажми ещё раз, чтобы повторить.`,
+          { reply_markup: controlKeyboard(id) },
+        )
+        .catch(() => {});
     }
     return true;
   }
 
-  await ctx.answerCallbackQuery({ text: "Unknown action" });
+  await ctx.answerCallbackQuery({ text: "Неизвестное действие" });
   return true;
 }

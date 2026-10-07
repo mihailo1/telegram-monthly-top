@@ -363,6 +363,27 @@ export function createBot() {
   }
 
   // --- Commands ---
+  // The admin's next plain text becomes the archive caption after "Своя подпись"
+  const menuLabels = new Set(Object.values(BTN));
+  bot.on("message:text", async (ctx, next) => {
+    const text = ctx.message.text;
+    if (
+      ctx.chat?.type === "private" &&
+      isAdmin(ctx) &&
+      !text.startsWith("/") &&
+      !menuLabels.has(text)
+    ) {
+      const { consumeCaptionInput } = await import("./archive/tick.js");
+      if (await consumeCaptionInput(ctx)) return;
+    }
+    await next();
+  });
+  bot.command("cancel", async (ctx) => {
+    if (!isAdmin(ctx) || ctx.chat?.type !== "private") return;
+    const { cancelCaptionInput } = await import("./archive/tick.js");
+    await cancelCaptionInput(ctx);
+  });
+
   bot.command("start", sendWelcome);
   bot.command("today", async (ctx) => {
     const deny = requireAdminPrivate(ctx);

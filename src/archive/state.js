@@ -92,3 +92,20 @@ export async function createDraftOnce(draft) {
     throw err;
   }
 }
+
+const AWAITING_KEY = "archive/awaiting.json";
+
+/** The admin's next plain text message becomes this draft's caption. */
+export async function setAwaiting(draftId) {
+  await writeJson(AWAITING_KEY, { draftId, at: new Date().toISOString() });
+}
+
+/** @returns {Promise<{ draftId: string, at: string } | null>} */
+export async function getAwaiting() {
+  const a = await readJson(AWAITING_KEY);
+  return a?.draftId ? a : null;
+}
+
+export async function clearAwaiting() {
+  await writeJson(AWAITING_KEY, {});
+}

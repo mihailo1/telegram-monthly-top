@@ -4,7 +4,7 @@
  * Sends monthly top preview to ADMIN_ID for ✅/❌ approval.
  *
  * Auth: Authorization: Bearer CRON_SECRET  OR  ?secret=CRON_SECRET
- * Vercel Cron sends header x-vercel-cron: 1
+ * Vercel Cron sends Authorization: Bearer CRON_SECRET when that env var is set
  */
 import { Bot } from "grammy";
 import { assertAdminId, assertBotToken, config as appConfig } from "../src/config.js";
@@ -20,9 +20,6 @@ function authorized(req) {
   const auth = req.headers?.authorization || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const q = req.query?.secret || "";
-  const isVercelCron = req.headers?.["x-vercel-cron"] === "1";
-
-  if (isVercelCron) return true;
   if (!secret) return !appConfig.isVercel;
   return bearer === secret || q === secret;
 }

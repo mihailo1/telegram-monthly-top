@@ -1,7 +1,7 @@
 /**
  * Frequent tick: members monoforum poll + members post + admin queue.
  * Monthly poll → avatar runs on its own, less frequent cron — see api/avatar-cron.js.
- * Auth: x-vercel-cron OR ?secret=CRON_SECRET
+ * Auth: Authorization: Bearer CRON_SECRET (Vercel Cron sends it) OR ?secret=CRON_SECRET
  */
 import { Bot } from "grammy";
 import { assertBotToken, config as appConfig } from "../src/config.js";
@@ -18,8 +18,6 @@ function authorized(req) {
   const auth = req.headers?.authorization || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const q = req.query?.secret || "";
-  const isVercelCron = req.headers?.["x-vercel-cron"] === "1";
-  if (isVercelCron) return true;
   if (!secret) return !appConfig.isVercel;
   return bearer === secret || q === secret;
 }

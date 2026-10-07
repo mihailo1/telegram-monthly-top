@@ -3,7 +3,7 @@
  * Split out from queue-cron (which ticks every 15m) since a 5-day delay
  * doesn't need 15-minute resolution — see .github/workflows/avatar-tick.yml.
  *
- * Auth: x-vercel-cron OR ?secret=CRON_SECRET
+ * Auth: Authorization: Bearer CRON_SECRET (Vercel Cron sends it) OR ?secret=CRON_SECRET
  */
 import { Bot } from "grammy";
 import { assertBotToken, config as appConfig } from "../src/config.js";
@@ -18,8 +18,6 @@ function authorized(req) {
   const auth = req.headers?.authorization || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const q = req.query?.secret || "";
-  const isVercelCron = req.headers?.["x-vercel-cron"] === "1";
-  if (isVercelCron) return true;
   if (!secret) return !appConfig.isVercel;
   return bearer === secret || q === secret;
 }

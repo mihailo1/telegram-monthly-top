@@ -1,6 +1,6 @@
 {
   "id": "muv37hvd-4lp1o",
-  "status": "pending",
+  "status": "done",
   "createdAt": "2026-10-05T10:08:40.249Z",
   "processAfter": "2026-10-10T10:08:40.249Z",
   "chatId": "-1001173228085",
@@ -15,5 +15,8 @@
     "AgACAgIAAxUHasNDSQJ2HK3LtYTB7WL0vpilIXEAAkEbaxsv3hhKHSKkza5QhooBAAMCAAN3AAM9BA"
   ],
   "rangeLabel": "September 2026",
-  "pollQuestion": "Лучший дед сентября 👴"
+  "pollQuestion": "Лучший дед сентября 👴",
+  "winnerIndex": 3,
+  "winnerVotes": 8,
+  "completedAt": "2026-10-10T12:10:16.802Z"
 }

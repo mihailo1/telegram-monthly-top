@@ -1,0 +1,21 @@
+{
+  "id": "man-mv43ou6e-r2",
+  "baseId": "man-mv43ou6e",
+  "round": 2,
+  "status": "pending",
+  "createdAt": "2026-10-11T17:34:17.161Z",
+  "theme": "walk",
+  "caption": "Архивное: Дедушки на прогулке! Элегантность вне времени. 👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "890_0",
+    "772_0",
+    "20_0"
+  ],
+  "albumMessageIds": [
+    603,
+    604,
+    605
+  ],
+  "adminMessageId": 606
+}

@@ -1,0 +1,23 @@
+{
+  "id": "man-mv43ou6e",
+  "baseId": "man-mv43ou6e",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-11T17:32:05.949Z",
+  "theme": "plaid",
+  "caption": "Архивное: Дедушки в клетчатых рубашках — вечная классика! 👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "605_0",
+    "970_0",
+    "506_0",
+    "812_0"
+  ],
+  "albumMessageIds": [
+    598,
+    599,
+    600,
+    601
+  ],
+  "adminMessageId": 602
+}

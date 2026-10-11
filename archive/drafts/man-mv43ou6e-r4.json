@@ -1,0 +1,21 @@
+{
+  "id": "man-mv43ou6e-r4",
+  "baseId": "man-mv43ou6e",
+  "round": 4,
+  "status": "pending",
+  "createdAt": "2026-10-11T17:35:27.599Z",
+  "theme": "rain",
+  "caption": "Архивное: дедушки под дождём держат стиль в любую погоду 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "894_0",
+    "397_0",
+    "630_0"
+  ],
+  "albumMessageIds": [
+    611,
+    612,
+    613
+  ],
+  "adminMessageId": 614
+}

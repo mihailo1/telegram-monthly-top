@@ -1,0 +1,21 @@
+{
+  "id": "man-mv43ou6e-r3",
+  "baseId": "man-mv43ou6e",
+  "round": 3,
+  "status": "pending",
+  "createdAt": "2026-10-11T17:34:59.586Z",
+  "theme": "scarf",
+  "caption": "Архивное: дедушки в шарфах для тепла и стиля 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "152_0",
+    "689_0",
+    "786_0"
+  ],
+  "albumMessageIds": [
+    607,
+    608,
+    609
+  ],
+  "adminMessageId": 610
+}

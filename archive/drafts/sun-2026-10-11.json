@@ -1,6 +1,23 @@
 {
   "id": "sun-2026-10-11",
-  "status": "creating",
-  "attempts": 2,
-  "claimedAt": "2026-10-11T07:15:31.978Z"
+  "baseId": "sun-2026-10-11",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-11T07:15:35.362Z",
+  "theme": "jeans",
+  "caption": "Архивное: дедушки в джинсах всегда на стиле 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "94_0",
+    "372_0",
+    "579_0",
+    "746_0"
+  ],
+  "albumMessageIds": [
+    575,
+    576,
+    577,
+    578
+  ],
+  "adminMessageId": 579
 }

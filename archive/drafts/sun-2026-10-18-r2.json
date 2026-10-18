@@ -1,0 +1,23 @@
+{
+  "id": "sun-2026-10-18-r2",
+  "baseId": "sun-2026-10-18",
+  "round": 2,
+  "status": "pending",
+  "createdAt": "2026-10-18T07:20:30.194Z",
+  "theme": "bus",
+  "caption": "Архивное: дедушки в транспорте при полном параде 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "7_0",
+    "213_0",
+    "211_0",
+    "449_0"
+  ],
+  "albumMessageIds": [
+    633,
+    634,
+    635,
+    636
+  ],
+  "adminMessageId": 637
+}

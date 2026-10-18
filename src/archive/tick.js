@@ -68,8 +68,9 @@ async function downloadPhoto(url) {
 /**
  * Send photos as one album. With `numbered` every photo is captioned with its
  * 1-based position (the picker); otherwise the caption goes on the first one.
- * With `links` the caption gets a numbered link to each photo's source post,
- * numbered by the photos that actually went out (a failed download is skipped).
+ * With `links` the caption ends with one line of keycap emoji, each linking to
+ * that photo's source post, numbered by the photos that actually went out (a
+ * failed download is skipped); the caption is then sent as HTML.
  * @returns {Promise<{ messages: import('grammy/types').Message[], sentIds: string[] }>}
  */
 async function sendAlbum(api, chatId, photos, caption, { numbered = false, links = false } = {}) {
@@ -89,7 +90,11 @@ async function sendAlbum(api, chatId, photos, caption, { numbered = false, links
   const media = ok.map((b, i) => ({
     type: "photo",
     media: new InputFile(b.buf, `${b.photo.id}.jpg`),
-    ...(numbered ? { caption: String(b.n) } : i === 0 ? { caption: firstCaption } : {}),
+    ...(numbered
+      ? { caption: String(b.n) }
+      : i === 0
+        ? { caption: firstCaption, ...(links ? { parse_mode: "HTML" } : {}) }
+        : {}),
   }));
   const messages = await api.sendMediaGroup(chatId, media);
   return { messages, sentIds: ok.map((b) => b.photo.id) };
@@ -148,6 +153,7 @@ async function applyCaption(api, draft) {
     // Links follow the photos the preview actually contains
     await api.editMessageCaption(adminId, draft.albumMessageIds[0], {
       caption: composeCaption(draft.caption, photosByIds(draft.sentIds || draft.photoIds)),
+      parse_mode: "HTML",
     });
     await api
       .editMessageText(adminId, draft.adminMessageId, controlText(draft), {

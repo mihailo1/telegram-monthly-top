@@ -15,6 +15,7 @@ import { localDayString, wallClock } from "../queue/time.js";
 import { markChannelPosted } from "../scheduler/channelPulse.js";
 import { incrementDayPost } from "../scheduler/dayState.js";
 import { buildCaption } from "./caption.js";
+import { composeCaption } from "./links.js";
 import { MAX_PICK, MIN_PICK, pickArchiveSet, poolForTheme } from "./pick.js";
 import {
   clearAwaiting,
@@ -67,12 +68,15 @@ async function downloadPhoto(url) {
 /**
  * Send photos as one album. With `numbered` every photo is captioned with its
  * 1-based position (the picker); otherwise the caption goes on the first one.
+ * With `links` the caption gets a numbered link to each photo's source post,
+ * numbered by the photos that actually went out (a failed download is skipped).
+ * @returns {Promise<{ messages: import('grammy/types').Message[], sentIds: string[] }>}
  */
-async function sendAlbum(api, chatId, photos, caption, { numbered = false } = {}) {
+async function sendAlbum(api, chatId, photos, caption, { numbered = false, links = false } = {}) {
   const downloaded = await Promise.all(
     photos.map(async (p, i) => {
       try {
-        return { n: i + 1, id: p.id, buf: await downloadPhoto(p.url) };
+        return { n: i + 1, photo: p, buf: await downloadPhoto(p.url) };
       } catch (err) {
         console.warn("archive photo skipped", p.id, err.message);
         return null;
@@ -81,12 +85,14 @@ async function sendAlbum(api, chatId, photos, caption, { numbered = false } = {}
   );
   const ok = downloaded.filter(Boolean);
   if (ok.length < 2) throw new Error("fewer than 2 archive photos downloaded");
+  const firstCaption = links ? composeCaption(caption, ok.map((b) => b.photo)) : caption;
   const media = ok.map((b, i) => ({
     type: "photo",
-    media: new InputFile(b.buf, `${b.id}.jpg`),
-    ...(numbered ? { caption: String(b.n) } : i === 0 ? { caption } : {}),
+    media: new InputFile(b.buf, `${b.photo.id}.jpg`),
+    ...(numbered ? { caption: String(b.n) } : i === 0 ? { caption: firstCaption } : {}),
   }));
-  return api.sendMediaGroup(chatId, media);
+  const messages = await api.sendMediaGroup(chatId, media);
+  return { messages, sentIds: ok.map((b) => b.photo.id) };
 }
 
 function captionSourceLabel(source) {
@@ -119,15 +125,18 @@ function controlKeyboard(id) {
     .text("🔄 Другая тема", `arch:swap:${id}`);
 }
 
-/** Send the album (with caption) and the control message, then save the ids. */
+/** Send the album (with caption and post links) and the control message, then save the ids. */
 async function sendPreview(api, draft) {
   const adminId = assertAdminId();
-  const albumMsgs = await sendAlbum(api, adminId, photosByIds(draft.photoIds), draft.caption);
+  const { messages, sentIds } = await sendAlbum(api, adminId, photosByIds(draft.photoIds), draft.caption, {
+    links: true,
+  });
   const control = await api.sendMessage(adminId, controlText(draft), {
     parse_mode: "HTML",
     reply_markup: controlKeyboard(draft.id),
   });
-  draft.albumMessageIds = albumMsgs.map((m) => m.message_id);
+  draft.albumMessageIds = messages.map((m) => m.message_id);
+  draft.sentIds = sentIds;
   draft.adminMessageId = control.message_id;
   await saveDraft(draft);
 }
@@ -136,8 +145,9 @@ async function sendPreview(api, draft) {
 async function applyCaption(api, draft) {
   const adminId = assertAdminId();
   try {
+    // Links follow the photos the preview actually contains
     await api.editMessageCaption(adminId, draft.albumMessageIds[0], {
-      caption: draft.caption,
+      caption: composeCaption(draft.caption, photosByIds(draft.sentIds || draft.photoIds)),
     });
     await api
       .editMessageText(adminId, draft.adminMessageId, controlText(draft), {
@@ -402,7 +412,7 @@ export async function handleArchiveCallback(ctx) {
   if (action === "edit") {
     await setAwaiting(id);
     await ctx.answerCallbackQuery();
-    await ctx.reply("✏️ Пришли новую подпись одним сообщением. Отмена: /cancel");
+    await ctx.reply("✏️ Пришли новую подпись одним сообщением, ссылки на посты добавлю сам. Отмена: /cancel");
     return true;
   }
 
@@ -492,7 +502,7 @@ export async function handleArchiveCallback(ctx) {
     await ctx.answerCallbackQuery({ text: "Публикую…" });
     await saveDraft({ ...draft, status: "posting" });
     try {
-      await sendAlbum(ctx.api, chatId, photosByIds(draft.photoIds), draft.caption);
+      await sendAlbum(ctx.api, chatId, photosByIds(draft.photoIds), draft.caption, { links: true });
       await markChannelPosted("admin", id);
       await incrementDayPost("admin");
       await recordArchivePost(draft.theme, draft.photoIds);

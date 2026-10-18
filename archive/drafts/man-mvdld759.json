@@ -1,0 +1,32 @@
+{
+  "id": "man-mvdld759",
+  "baseId": "man-mvdld759",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-18T08:56:53.806Z",
+  "theme": "watch",
+  "caption": "Архивное: пунктуальные дедушки с часами👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "841_0",
+    "727_0",
+    "281_0",
+    "929_0",
+    "89_0"
+  ],
+  "albumMessageIds": [
+    641,
+    642,
+    643,
+    644,
+    645
+  ],
+  "sentIds": [
+    "841_0",
+    "727_0",
+    "281_0",
+    "929_0",
+    "89_0"
+  ],
+  "adminMessageId": 646
+}

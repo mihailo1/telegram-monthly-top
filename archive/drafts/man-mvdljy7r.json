@@ -1,0 +1,26 @@
+{
+  "id": "man-mvdljy7r",
+  "baseId": "man-mvdljy7r",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-18T09:02:12.598Z",
+  "theme": "metro",
+  "caption": "Архивное: подземный шик — дедушки в метро 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "27_0",
+    "778_0",
+    "55_0"
+  ],
+  "albumMessageIds": [
+    650,
+    651,
+    652
+  ],
+  "sentIds": [
+    "27_0",
+    "778_0",
+    "55_0"
+  ],
+  "adminMessageId": 653
+}

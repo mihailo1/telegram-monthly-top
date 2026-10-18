@@ -1,6 +1,25 @@
 {
   "id": "sun-2026-10-18",
-  "status": "creating",
-  "attempts": 1,
-  "claimedAt": "2026-10-18T07:00:50.005Z"
+  "baseId": "sun-2026-10-18",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-18T07:00:53.021Z",
+  "theme": "scarf",
+  "caption": "Архивное: дедушки в шарфах для тепла и стиля 👴",
+  "captionSource": "gemini:main gemini-3.8-flash",
+  "photoIds": [
+    "42_0",
+    "919_0",
+    "186_0",
+    "458_0",
+    "802_0"
+  ],
+  "albumMessageIds": [
+    627,
+    628,
+    629,
+    630,
+    631
+  ],
+  "adminMessageId": 632
 }

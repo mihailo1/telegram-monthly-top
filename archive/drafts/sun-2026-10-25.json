@@ -1,6 +1,26 @@
 {
   "id": "sun-2026-10-25",
-  "status": "creating",
-  "attempts": 2,
-  "claimedAt": "2026-10-25T07:15:35.545Z"
+  "baseId": "sun-2026-10-25",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-10-25T07:15:40.251Z",
+  "theme": "shop",
+  "caption": "Архивное: дедушки и шопинг – два в одном. Или просто в магазинах 👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "85_0",
+    "92_0",
+    "15_0"
+  ],
+  "albumMessageIds": [
+    693,
+    694,
+    695
+  ],
+  "sentIds": [
+    "85_0",
+    "92_0",
+    "15_0"
+  ],
+  "adminMessageId": 696
 }

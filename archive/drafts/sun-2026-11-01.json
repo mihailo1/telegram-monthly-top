@@ -1,6 +1,26 @@
 {
   "id": "sun-2026-11-01",
-  "status": "creating",
-  "attempts": 2,
-  "claimedAt": "2026-11-01T07:15:31.444Z"
+  "baseId": "sun-2026-11-01",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-11-01T07:15:34.222Z",
+  "theme": "plaid",
+  "caption": "Архивное: дедушки в клетчатых рубашках — вечная классика! 👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "963_0",
+    "833_0",
+    "918_0"
+  ],
+  "albumMessageIds": [
+    711,
+    712,
+    713
+  ],
+  "sentIds": [
+    "963_0",
+    "833_0",
+    "918_0"
+  ],
+  "adminMessageId": 714
 }

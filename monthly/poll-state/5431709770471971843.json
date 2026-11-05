@@ -34,7 +34,7 @@
     {
       "persistent_id": "6",
       "text": "7️⃣",
-      "voter_count": 3
+      "voter_count": 4
     },
     {
       "persistent_id": "7",
@@ -42,7 +42,7 @@
       "voter_count": 1
     }
   ],
-  "totalVoterCount": 11,
+  "totalVoterCount": 12,
   "isClosed": false,
-  "updatedAt": "2026-11-05T12:30:43.402Z"
+  "updatedAt": "2026-11-05T12:38:33.016Z"
 }

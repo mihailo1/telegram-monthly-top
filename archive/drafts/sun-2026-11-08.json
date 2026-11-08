@@ -1,6 +1,26 @@
 {
   "id": "sun-2026-11-08",
-  "status": "creating",
-  "attempts": 2,
-  "claimedAt": "2026-11-08T07:15:34.342Z"
+  "baseId": "sun-2026-11-08",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-11-08T07:15:38.934Z",
+  "theme": "jeans",
+  "caption": "Архивное: наглядное пособие \"Как правильно носить джинсы в любом возрасте\" 👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "606_0",
+    "215_0",
+    "6_0"
+  ],
+  "albumMessageIds": [
+    743,
+    744,
+    745
+  ],
+  "sentIds": [
+    "606_0",
+    "215_0",
+    "6_0"
+  ],
+  "adminMessageId": 746
 }

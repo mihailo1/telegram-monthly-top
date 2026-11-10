@@ -1,6 +1,6 @@
 {
   "id": "mw35zi60-esnf6",
-  "status": "pending",
+  "status": "done",
   "createdAt": "2026-11-05T06:28:17.976Z",
   "processAfter": "2026-11-10T06:28:17.976Z",
   "chatId": "-1001173228085",
@@ -18,5 +18,8 @@
     "AgACAgIAAxUHauwhxgMmCdzVnrjFJQZe7q8cSMsAAu4gaxuSp2BLaKH_df4Z0ZQBAAMCAAN3AAM9BA"
   ],
   "rangeLabel": "October 2026",
-  "pollQuestion": "Лучший дед октября 👴"
+  "pollQuestion": "Лучший дед октября 👴",
+  "winnerIndex": 2,
+  "winnerVotes": 4,
+  "completedAt": "2026-11-10T08:42:37.001Z"
 }

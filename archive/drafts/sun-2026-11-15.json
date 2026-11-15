@@ -1,6 +1,32 @@
 {
   "id": "sun-2026-11-15",
-  "status": "creating",
-  "attempts": 1,
-  "claimedAt": "2026-11-15T07:00:54.682Z"
+  "baseId": "sun-2026-11-15",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-11-15T07:00:58.287Z",
+  "theme": "metro",
+  "caption": "Архивное: Дедушки в метро – стильно, модно, удобно.👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "55_0",
+    "295_0",
+    "631_0",
+    "343_0",
+    "345_0"
+  ],
+  "albumMessageIds": [
+    793,
+    794,
+    795,
+    796,
+    797
+  ],
+  "sentIds": [
+    "55_0",
+    "295_0",
+    "631_0",
+    "343_0",
+    "345_0"
+  ],
+  "adminMessageId": 798
 }

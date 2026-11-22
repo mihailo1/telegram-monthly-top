@@ -1,7 +1,26 @@
 {
   "id": "sun-2026-11-22",
-  "status": "creating",
-  "attempts": 2,
-  "error": "Call to 'sendMediaGroup' failed! (400: Bad Request: failed to send message #2 with the error message \"IMAGE_PROCESS_FAILED\")",
-  "claimedAt": "2026-11-22T07:15:38.284Z"
+  "baseId": "sun-2026-11-22",
+  "round": 1,
+  "status": "pending",
+  "createdAt": "2026-11-22T07:15:40.821Z",
+  "theme": "rain",
+  "caption": "Архивное: наши дедушки и дождь им нипочем! 👴",
+  "captionSource": "gemini:main gemini-2.5-flash",
+  "photoIds": [
+    "54_0",
+    "379_0",
+    "397_0"
+  ],
+  "albumMessageIds": [
+    818,
+    819,
+    820
+  ],
+  "sentIds": [
+    "54_0",
+    "379_0",
+    "397_0"
+  ],
+  "adminMessageId": 821
 }

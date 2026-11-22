@@ -1,6 +1,6 @@
 {
   "id": "sun-2026-11-22",
-  "status": "creating",
+  "status": "failed",
   "attempts": 1,
-  "claimedAt": "2026-11-22T07:00:53.779Z"
+  "error": "Call to 'sendMediaGroup' failed! (400: Bad Request: failed to send message #2 with the error message \"IMAGE_PROCESS_FAILED\")"
 }
